@@ -1,2 +1,2 @@
-from .session import get_session, engine, init_db
+from .session import AsyncSessionLocal, engine, init_db
 from .models import Base, User, Plan, Server, Subscription, Transaction, ReferralBonus
