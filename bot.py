@@ -3,14 +3,11 @@ import logging
 from aiohttp import web
 from aiogram import Bot, Dispatcher
 from config import BOT_TOKEN
-from database.session import engine
-from database.models import Base
-from handlers import start, buy, profile, admin, payments
+from database.session import init_db
+from handlers import (
+    start, main_menu, trial, instructions, subscription, profile, referral, admin, payments
+)
 from utils.scheduler import start_scheduler
-
-async def init_db():
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
 
 async def health_check(request):
     return web.Response(text="OK")
@@ -22,7 +19,7 @@ async def start_http_server():
     await runner.setup()
     site = web.TCPSite(runner, '0.0.0.0', 10000)
     await site.start()
-    # Бесконечное ожидание, чтобы задача не завершалась
+    # Бесконечное ожидание
     await asyncio.Event().wait()
 
 async def main():
@@ -32,15 +29,25 @@ async def main():
     bot = Bot(token=BOT_TOKEN)
     dp = Dispatcher()
 
-    dp.include_routers(start.router, buy.router, profile.router, admin.router, payments.router)
+    dp.include_routers(
+        start.router,
+        main_menu.router,
+        trial.router,
+        instructions.router,
+        subscription.router,
+        profile.router,
+        referral.router,
+        admin.router,
+        payments.router
+    )
 
-    # Запускаем HTTP‑сервер для health check (Render будет видеть порт)
+    # Запускаем HTTP-сервер для health check (чтобы Render не ругался)
     asyncio.create_task(start_http_server())
 
-    # Запускаем планировщик, передавая бота для отправки уведомлений
+    # Запускаем планировщик
     start_scheduler(bot)
 
-    # Запускаем бота в режиме long polling
+    # Запускаем поллинг
     await dp.start_polling(bot)
 
 if __name__ == '__main__':
