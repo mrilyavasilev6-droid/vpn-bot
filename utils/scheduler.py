@@ -10,6 +10,7 @@ import logging
 scheduler = AsyncIOScheduler()
 
 async def check_expired_subscriptions():
+    """Удаляет истекшие подписки и отключает клиентов на серверах."""
     async with AsyncSessionLocal() as session:
         now = datetime.now()
         expired = await session.execute(
@@ -28,6 +29,7 @@ async def check_expired_subscriptions():
             await session.commit()
 
 async def notify_expiring(bot):
+    """Уведомляет пользователей за 3, 2 и 1 день до окончания подписки."""
     async with AsyncSessionLocal() as session:
         now = datetime.now()
         for days in [3, 2, 1]:
@@ -41,7 +43,7 @@ async def notify_expiring(bot):
             for sub, user in subs:
                 await bot.send_message(
                     user.user_id,
-                    f"Ваша подписка истекает через {days} дня/дней. Продлите её, чтобы не потерять доступ."
+                    f"⚠️ Ваша подписка истекает через {days} дня/дней. Продлите её, чтобы не потерять доступ."
                 )
 
 def start_scheduler(bot):
