@@ -1,0 +1,9 @@
+from .start import router as start_router
+from .main_menu import router as main_menu_router
+from .trial import router as trial_router
+from .instructions import router as instructions_router
+from .subscription import router as subscription_router
+from .profile import router as profile_router
+from .referral import router as referral_router
+from .admin import router as admin_router
+from .payments import router as payments_router
