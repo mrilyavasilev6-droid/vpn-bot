@@ -1,7 +1,7 @@
 from aiogram import Router, types, F
 from aiogram.filters import Command
 from config import ADMIN_IDS
-from database.session import get_session
+from database.session import AsyncSessionLocal
 from database.models import Plan, Server
 from sqlalchemy import select
 
@@ -16,16 +16,16 @@ async def admin_panel(message: types.Message):
 
 @router.message(Command('add_plan'), F.from_user.id.in_(ADMIN_IDS))
 async def add_plan(message: types.Message):
-    # /add_plan "Премиум" 30 500 1500
+    # /add_plan "Название" 30 500 1500
     args = message.text.split(maxsplit=4)
     if len(args) < 5:
-        await message.answer("Формат: /add_plan \"Название\" дней цена_звезды цена_рубли_в_копейках")
+        await message.answer("Формат: /add_plan \"Название\" дней цена_звезды цена_рубли_копейки")
         return
     name = args[1].strip('"')
     duration = int(args[2])
     price_stars = int(args[3])
     price_rub = int(args[4])
-    async with get_session() as session:
+    async with AsyncSessionLocal() as session:
         plan = Plan(name=name, duration_days=duration, price_stars=price_stars, price_rub=price_rub)
         session.add(plan)
         await session.commit()
