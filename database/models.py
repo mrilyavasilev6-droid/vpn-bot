@@ -10,14 +10,18 @@ class User(Base):
     username = Column(String(255))
     created_at = Column(DateTime, server_default=func.now())
     referral_by = Column(BigInteger, ForeignKey('users.user_id', ondelete='SET NULL'))
+    balance = Column(Integer, default=0)          # баланс в рублях (копейки)
+    auto_renew = Column(Boolean, default=False)   # автопродление
+    trial_used = Column(Boolean, default=False)   # использовал ли пробный период
+    trial_end_date = Column(DateTime, nullable=True)  # дата окончания пробного периода (если активен)
 
 class Plan(Base):
     __tablename__ = 'plans'
     id = Column(Integer, primary_key=True)
     name = Column(String(100), nullable=False)
     duration_days = Column(Integer, nullable=False)
-    price_stars = Column(Integer, nullable=False)
-    price_rub = Column(Integer, nullable=False)   # в копейках
+    price_stars = Column(Integer, nullable=False)   # цена в Telegram Stars
+    price_rub = Column(Integer, nullable=False)     # цена в рублях (копейки)
     description = Column(Text)
     is_active = Column(Boolean, default=True)
 
@@ -38,7 +42,7 @@ class Subscription(Base):
     id = Column(Integer, primary_key=True)
     user_id = Column(BigInteger, ForeignKey('users.user_id', ondelete='CASCADE'))
     plan_id = Column(Integer, ForeignKey('plans.id'))
-    client_id = Column(String(255))
+    client_id = Column(String(255))          # ID клиента в VPN-панели
     server_id = Column(Integer, ForeignKey('servers.id'))
     start_date = Column(DateTime, server_default=func.now())
     end_date = Column(DateTime, nullable=False)
@@ -48,9 +52,9 @@ class Transaction(Base):
     __tablename__ = 'transactions'
     id = Column(Integer, primary_key=True)
     user_id = Column(BigInteger, ForeignKey('users.user_id'))
-    amount = Column(Integer, nullable=False)
-    currency = Column(String(10), nullable=False)   # 'XTR' или 'RUB'
-    payment_method = Column(String(20))             # 'stars', 'yookassa', 'crypto'
+    amount = Column(Integer, nullable=False)          # сумма в копейках или звездах
+    currency = Column(String(10), nullable=False)     # 'XTR', 'RUB'
+    payment_method = Column(String(20))               # 'stars', 'yookassa', 'crypto'
     status = Column(String(20), default='pending')
     telegram_payload = Column(Text)
     created_at = Column(DateTime, server_default=func.now())
@@ -60,5 +64,13 @@ class ReferralBonus(Base):
     id = Column(Integer, primary_key=True)
     referrer_id = Column(BigInteger, ForeignKey('users.user_id'))
     referred_id = Column(BigInteger, ForeignKey('users.user_id'))
-    bonus_days = Column(Integer)
+    bonus_days = Column(Integer)          # сколько дней добавилось к подписке реферера
     awarded_at = Column(DateTime, server_default=func.now())
+
+class Trial(Base):
+    __tablename__ = 'trials'
+    id = Column(Integer, primary_key=True)
+    user_id = Column(BigInteger, ForeignKey('users.user_id'))
+    start_date = Column(DateTime, server_default=func.now())
+    end_date = Column(DateTime, nullable=False)
+    is_active = Column(Boolean, default=True)
