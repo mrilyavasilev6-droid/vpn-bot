@@ -56,3 +56,22 @@ async def stats(message: types.Message):
             f"Активных подписок: {active_subs.scalar()}\n"
             f"Доход (руб): {income.scalar()/100 if income.scalar() else 0}"
         )
+@router.message(Command('del_plan'), F.from_user.id.in_(ADMIN_IDS))
+async def delete_plan(message: types.Message):
+    args = message.text.split()
+    if len(args) != 2:
+        await message.answer("Используйте: /del_plan <id_тарифа>")
+        return
+    try:
+        plan_id = int(args[1])
+    except ValueError:
+        await message.answer("ID должен быть числом")
+        return
+    async with AsyncSessionLocal() as session:
+        plan = await session.get(Plan, plan_id)
+        if not plan:
+            await message.answer(f"Тариф с ID {plan_id} не найден")
+            return
+        await session.delete(plan)
+        await session.commit()
+    await message.answer(f"Тариф ID {plan_id} удалён")
