@@ -3,6 +3,7 @@ from aiogram.filters import CommandStart
 from sqlalchemy import select
 from database.session import AsyncSessionLocal
 from database.models import User
+from handlers.main_menu import show_main_menu
 
 router = Router()
 
@@ -12,7 +13,6 @@ async def cmd_start(message: types.Message):
     username = message.from_user.username
 
     async with AsyncSessionLocal() as session:
-        # Проверяем, существует ли пользователь
         user = await session.execute(select(User).where(User.user_id == user_id))
         user = user.scalar_one_or_none()
 
@@ -22,14 +22,10 @@ async def cmd_start(message: types.Message):
             if len(args) > 1 and args[1].startswith('ref_'):
                 try:
                     referrer_id = int(args[1][4:])
-                except:
+                except ValueError:
                     pass
             user = User(user_id=user_id, username=username, referral_by=referrer_id)
             session.add(user)
             await session.commit()
 
-    await message.answer(
-        "Добро пожаловать в VPN-бот! 🚀\n"
-        "Используйте /buy для покупки подписки.\n"
-        "/profile — личный кабинет."
-    )
+    await show_main_menu(message)
