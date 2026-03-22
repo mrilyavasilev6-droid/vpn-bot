@@ -46,3 +46,15 @@ async def stats(message: types.Message):
             f"Активных подписок: {active_subs.scalar()}\n"
             f"Доход (руб): {income.scalar()/100 if income.scalar() else 0}"
         )
+@router.message(Command('add_plans'), F.from_user.id.in_(ADMIN_IDS))
+async def add_default_plans(message: types.Message):
+    from database.models import Plan
+    async with AsyncSessionLocal() as session:
+        plans = [
+            Plan(name='1 месяц', duration_days=30, price_stars=75, price_rub=15000, description='30 дней доступа, 1 устройство'),
+            Plan(name='3 месяца', duration_days=90, price_stars=200, price_rub=45000, description='90 дней доступа, 1 устройство'),
+            Plan(name='12 месяцев', duration_days=365, price_stars=750, price_rub=150000, description='365 дней доступа, 1 устройство')
+        ]
+        session.add_all(plans)
+        await session.commit()
+    await message.answer("✅ Тарифы добавлены!")
