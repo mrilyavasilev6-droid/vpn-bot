@@ -1,6 +1,9 @@
 import aiohttp
 import json
 from datetime import datetime, timedelta
+import os
+
+MOCK_MODE = os.getenv('MOCK_MODE', 'True').lower() == 'true'
 
 class XUIClient:
     def __init__(self, api_url, username, password):
@@ -10,6 +13,8 @@ class XUIClient:
         self.cookie = None
 
     async def _request(self, method, endpoint, data=None):
+        if MOCK_MODE:
+            return {"success": True, "mock": True}
         async with aiohttp.ClientSession() as session:
             if not self.cookie:
                 # Логин
@@ -23,11 +28,12 @@ class XUIClient:
                 return await resp.json()
 
     async def add_client(self, days):
-        # Пример добавления клиента в inbound с ID=1
+        if MOCK_MODE:
+            return f"mock_client_{datetime.now().timestamp()}"
         email = f"user_{datetime.now().timestamp()}"
         expire = int((datetime.now() + timedelta(days=days)).timestamp() * 1000)
         payload = {
-            "id": 1,
+            "id": 1,  # ID инбаунда (должен существовать)
             "settings": json.dumps({
                 "clients": [{
                     "email": email,
@@ -45,9 +51,13 @@ class XUIClient:
         return None
 
     async def delete_client(self, client_id):
+        if MOCK_MODE:
+            return True
         resp = await self._request('POST', f'/panel/api/inbounds/delClient/{client_id}')
         return resp.get('success', False)
 
     async def get_client_config(self, client_id):
-        # Здесь должна быть логика получения конфига из панели или генерация
+        if MOCK_MODE:
+            return f"[Interface]\nPrivateKey = mock_{client_id}\nAddress = 10.0.0.2/24\nDNS = 1.1.1.1"
+        # Здесь нужно реализовать получение конфига из панели
         return f"Конфиг для {client_id} (заглушка)"
