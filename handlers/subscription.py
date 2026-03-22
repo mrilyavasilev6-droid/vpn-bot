@@ -4,7 +4,6 @@ from sqlalchemy import select
 from database.session import AsyncSessionLocal
 from database.models import Plan
 from config import PROVIDER_TOKEN
-from handlers.payments import process_payment
 
 router = Router()
 
