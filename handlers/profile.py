@@ -1,7 +1,7 @@
 from aiogram import Router, types
 from aiogram.filters import Command
 from sqlalchemy import select
-from database.session import get_session
+from database.session import AsyncSessionLocal
 from database.models import Subscription, Plan, Server
 import datetime
 
@@ -10,7 +10,7 @@ router = Router()
 @router.message(Command('profile'))
 async def profile(message: types.Message):
     user_id = message.from_user.id
-    async with get_session() as session:
+    async with AsyncSessionLocal() as session:
         result = await session.execute(
             select(Subscription, Plan, Server)
             .join(Plan, Subscription.plan_id == Plan.id)
