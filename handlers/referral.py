@@ -1,5 +1,4 @@
 from aiogram import Router, types
-from aiogram.filters import Command
 from sqlalchemy import select, func
 from database.session import AsyncSessionLocal
 from database.models import User, ReferralBonus
@@ -18,10 +17,10 @@ async def referral_info(callback: types.CallbackQuery):
         bonus_days = bonus_days.scalar() or 0
 
         text = (
-            "👥 **Реферальная программа**\n\n"
+            "👥 <b>Реферальная программа</b>\n\n"
             "Приглашайте друзей и получайте бонусы!\n"
             "За каждого друга, который купит подписку, вы получите +7 дней к вашей подписке.\n\n"
-            f"**Ваша ссылка:**\n{ref_link}\n\n"
+            f"<b>Ваша ссылка:</b>\n{ref_link}\n\n"
             f"Приглашено друзей: {referrals_count}\n"
             f"Получено бонусных дней: {bonus_days}"
         )
@@ -29,5 +28,5 @@ async def referral_info(callback: types.CallbackQuery):
             [types.InlineKeyboardButton(text="Поделиться", url=f"https://t.me/share/url?url={ref_link}&text=Привет! Подключай быстрый VPN по моей ссылке:")],
             [types.InlineKeyboardButton(text="◀ Назад", callback_data="main_menu")]
         ])
-        await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
+        await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
     await callback.answer()
