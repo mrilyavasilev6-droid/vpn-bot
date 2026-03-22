@@ -2,53 +2,11 @@ from aiogram import Router, types
 from aiogram.types import LabeledPrice, PreCheckoutQuery
 from config import PROVIDER_TOKEN
 from database.session import AsyncSessionLocal
-from database.crud import get_active_plan, get_least_loaded_server, create_subscription, add_transaction
+from database.models import Plan, User, Subscription, Server, ReferralBonus, Transaction
 from vpn.xui import XUIClient
 import datetime
 
 router = Router()
-
-@router.callback_query(lambda c: c.data.startswith('pay_stars_'))
-async def pay_with_stars(callback: types.CallbackQuery):
-    plan_id = int(callback.data.split('_')[2])
-    async with AsyncSessionLocal() as session:
-        plan = await get_active_plan(session, plan_id)
-        if not plan:
-            await callback.answer("Тариф не найден")
-            return
-
-    await callback.message.answer_invoice(
-        title=plan.name,
-        description=plan.description or f"VPN подписка на {plan.duration_days} дней",
-        payload=f"plan_{plan_id}_{callback.from_user.id}",
-        provider_token="",  # для Stars пусто
-        currency="XTR",
-        prices=[LabeledPrice(label=plan.name, amount=plan.price_stars)],
-        start_parameter="vpn_subscription"
-    )
-    await callback.answer()
-
-@router.callback_query(lambda c: c.data.startswith('pay_card_'))
-async def pay_with_card(callback: types.CallbackQuery):
-    plan_id = int(callback.data.split('_')[2])
-    async with AsyncSessionLocal() as session:
-        plan = await get_active_plan(session, plan_id)
-        if not plan:
-            await callback.answer("Тариф не найден")
-            return
-
-    await callback.message.answer_invoice(
-        title=plan.name,
-        description=plan.description or f"VPN подписка на {plan.duration_days} дней",
-        payload=f"plan_{plan_id}_{callback.from_user.id}",
-        provider_token=PROVIDER_TOKEN,
-        currency="RUB",
-        prices=[LabeledPrice(label=plan.name, amount=plan.price_rub)],
-        start_parameter="vpn_subscription",
-        need_email=True,
-        need_phone_number=True
-    )
-    await callback.answer()
 
 @router.pre_checkout_query()
 async def pre_checkout(pre_checkout_query: PreCheckoutQuery):
@@ -61,37 +19,81 @@ async def successful_payment(message: types.Message):
     _, plan_id_str, user_id_str = payload.split('_')
     plan_id = int(plan_id_str)
     user_id = int(user_id_str)
-    currency = payment.currency
-    amount = payment.total_amount
-    method = 'stars' if currency == 'XTR' else 'yookassa'
 
     async with AsyncSessionLocal() as session:
-        await add_transaction(session, user_id, amount, currency, method, str(payment))
+        # Сохраняем транзакцию
+        tx = Transaction(
+            user_id=user_id,
+            amount=payment.total_amount,
+            currency=payment.currency,
+            payment_method='yookassa',
+            status='completed',
+            telegram_payload=str(payment)
+        )
+        session.add(tx)
 
-        plan = await get_active_plan(session, plan_id)
+        plan = await session.get(Plan, plan_id)
         if not plan:
             await message.answer("Ошибка: тариф не найден")
             return
 
-        server = await get_least_loaded_server(session)
-        if not server:
+        # Выбираем сервер
+        servers = await session.execute(
+            select(Server).where(Server.max_clients > Server.current_clients)
+        )
+        servers = servers.scalars().all()
+        if not servers:
             await message.answer("Нет доступных серверов. Обратитесь к администратору.")
             return
+        server = min(servers, key=lambda s: s.current_clients / s.max_clients if s.max_clients else 0)
 
+        # Создаём клиента на сервере
         xui = XUIClient(server.api_url, server.api_username, server.api_password)
         client_id = await xui.add_client(plan.duration_days)
         if not client_id:
-            await message.answer("Ошибка при создании подписки. Попробуйте позже.")
+            await message.answer("Ошибка создания подписки. Попробуйте позже.")
             return
 
         server.current_clients += 1
 
         end_date = datetime.datetime.now() + datetime.timedelta(days=plan.duration_days)
-        await create_subscription(session, user_id, plan_id, client_id, server.id, end_date)
+        subscription = Subscription(
+            user_id=user_id,
+            plan_id=plan_id,
+            client_id=client_id,
+            server_id=server.id,
+            end_date=end_date,
+            is_active=True
+        )
+        session.add(subscription)
+
+        # Реферальная система: начисляем бонус рефереру
+        user = await session.get(User, user_id)
+        if user and user.referral_by:
+            existing = await session.execute(
+                select(ReferralBonus).where(ReferralBonus.referred_id == user_id)
+            )
+            if not existing.scalar_one_or_none():
+                referrer = await session.get(User, user.referral_by)
+                # Начисляем 7 дней к подписке реферера
+                referrer_sub = await session.execute(
+                    select(Subscription).where(Subscription.user_id == user.referral_by, Subscription.is_active == True)
+                )
+                referrer_sub = referrer_sub.scalar_one_or_none()
+                if referrer_sub:
+                    referrer_sub.end_date += datetime.timedelta(days=7)
+                else:
+                    # Создаём подписку на 7 дней (без плана)
+                    # Можно использовать план с duration=7, если есть
+                    pass
+                bonus = ReferralBonus(referrer_id=user.referral_by, referred_id=user_id, bonus_days=7)
+                session.add(bonus)
 
         await session.commit()
 
-    config_data = await xui.get_client_config(client_id)
+    # Получаем конфиг (реализовать в xui)
+    config_data = await xui.get_client_config(client_id)  # заглушка
+
     await message.answer(f"Подписка активирована до {end_date.strftime('%d.%m.%Y')}.")
     await message.answer_document(
         types.BufferedInputFile(config_data.encode('utf-8'), filename="config.conf"),
