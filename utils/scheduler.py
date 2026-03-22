@@ -2,15 +2,15 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from datetime import datetime, timedelta
 from sqlalchemy import select
-from database.session import get_session
-from database.models import Subscription, Server
+from database.session import AsyncSessionLocal
+from database.models import Subscription, Server, User
 from vpn.xui import XUIClient
 import logging
 
 scheduler = AsyncIOScheduler()
 
 async def check_expired_subscriptions():
-    async with get_session() as session:
+    async with AsyncSessionLocal() as session:
         now = datetime.now()
         expired = await session.execute(
             select(Subscription).where(Subscription.is_active == True, Subscription.end_date <= now)
@@ -27,20 +27,24 @@ async def check_expired_subscriptions():
                     logging.error(f"Ошибка удаления клиента {sub.client_id}: {e}")
             await session.commit()
 
-async def notify_expiring():
-    async with get_session() as session:
+async def notify_expiring(bot):
+    async with AsyncSessionLocal() as session:
         now = datetime.now()
         for days in [3, 2, 1]:
             target = now + timedelta(days=days)
             subs = await session.execute(
-                select(Subscription).where(Subscription.is_active == True,
-                                           Subscription.end_date.between(target, target + timedelta(days=1)))
+                select(Subscription, User)
+                .join(User, Subscription.user_id == User.user_id)
+                .where(Subscription.is_active == True,
+                       Subscription.end_date.between(target, target + timedelta(days=1)))
             )
-            # здесь нужно отправлять уведомления через бота (бот доступен глобально)
-            # для этого можно передать бота в планировщик
-            pass
+            for sub, user in subs:
+                await bot.send_message(
+                    user.user_id,
+                    f"Ваша подписка истекает через {days} дня/дней. Продлите её, чтобы не потерять доступ."
+                )
 
 def start_scheduler(bot):
     scheduler.add_job(check_expired_subscriptions, CronTrigger(hour=0, minute=0))
-    scheduler.add_job(notify_expiring, CronTrigger(hour=9, minute=0))
+    scheduler.add_job(lambda: notify_expiring(bot), CronTrigger(hour=9, minute=0))
     scheduler.start()
