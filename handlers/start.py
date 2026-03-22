@@ -1,17 +1,21 @@
 from aiogram import Router, types
 from aiogram.filters import CommandStart
-from database.session import get_session
-from database.crud import get_user, create_user
+from sqlalchemy import select
+from database.session import AsyncSessionLocal
+from database.models import User
 
 router = Router()
 
 @router.message(CommandStart())
 async def cmd_start(message: types.Message):
     user_id = message.from_user.id
-    username = message.from_user.username or ""
+    username = message.from_user.username
 
-    async with get_session() as session:
-        user = await get_user(session, user_id)
+    async with AsyncSessionLocal() as session:
+        # Проверяем, существует ли пользователь
+        user = await session.execute(select(User).where(User.user_id == user_id))
+        user = user.scalar_one_or_none()
+
         if not user:
             args = message.text.split()
             referrer_id = None
@@ -20,7 +24,9 @@ async def cmd_start(message: types.Message):
                     referrer_id = int(args[1][4:])
                 except:
                     pass
-            user = await create_user(session, user_id, username, referrer_id)
+            user = User(user_id=user_id, username=username, referral_by=referrer_id)
+            session.add(user)
+            await session.commit()
 
     await message.answer(
         "Добро пожаловать в VPN-бот! 🚀\n"
