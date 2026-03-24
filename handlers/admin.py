@@ -1,10 +1,10 @@
 import shlex
 from aiogram import Router, types, F
 from aiogram.filters import Command
-from sqlalchemy import select, func
+from sqlalchemy import select, func, delete
 from config import ADMIN_IDS
 from database.session import AsyncSessionLocal
-from database.models import Plan, Server, User, Subscription, Transaction
+from database.models import Plan, Server, User, Subscription, Transaction, Trial, ReferralBonus
 from database.crud import create_promo_code, get_all_promo_codes
 
 router = Router()
@@ -23,6 +23,7 @@ async def admin_panel(message: types.Message):
         "/del_plan <id> - удалить тариф\n"
         "/servers - список серверов\n"
         "/add_server - добавить сервер\n"
+        "/clear_trial [user_id] - очистить пробный период пользователя\n"
         "/create_promo <дни> <макс_использований> [код] - создать промокод\n"
         "/list_promo - список промокодов",
         parse_mode="Markdown"
@@ -179,6 +180,55 @@ async def add_server_command(message: types.Message):
             "📍 Локация: Frankfurt\n"
             "📡 Хост: 87.242.86.245\n"
             "👥 Максимум клиентов: 100",
+            parse_mode="Markdown"
+        )
+
+
+@router.message(Command('clear_trial'), F.from_user.id.in_(ADMIN_IDS))
+async def clear_trial(message: types.Message):
+    """Очистить пробный период пользователя: /clear_trial [user_id]"""
+    args = message.text.split()
+    
+    # Если указан user_id, используем его, иначе свой
+    if len(args) > 1:
+        try:
+            user_id = int(args[1])
+        except ValueError:
+            await message.answer("❌ ID пользователя должен быть числом")
+            return
+    else:
+        user_id = message.from_user.id
+    
+    async with AsyncSessionLocal() as session:
+        # Удаляем подписки с plan_id=None (пробные)
+        result_sub = await session.execute(
+            delete(Subscription).where(
+                Subscription.user_id == user_id,
+                Subscription.plan_id == None
+            )
+        )
+        
+        # Удаляем записи в trials
+        result_trial = await session.execute(
+            delete(Trial).where(Trial.user_id == user_id)
+        )
+        
+        # Сбрасываем флаг trial_used у пользователя
+        user = await session.get(User, user_id)
+        if user:
+            user.trial_used = False
+            user.trial_end_date = None
+        
+        await session.commit()
+        
+        deleted_subs = result_sub.rowcount
+        deleted_trials = result_trial.rowcount
+        
+        await message.answer(
+            f"✅ *Пробный период очищен для пользователя* `{user_id}`\n\n"
+            f"🗑 Удалено подписок: {deleted_subs}\n"
+            f"🗑 Удалено trial-записей: {deleted_trials}\n\n"
+            f"Пользователь может активировать пробный период заново.",
             parse_mode="Markdown"
         )
 
