@@ -1,6 +1,7 @@
 from aiogram import Router, types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from datetime import datetime, timedelta
+import time
 from sqlalchemy import select, delete
 from database.session import AsyncSessionLocal
 from database.models import User, Trial, Subscription
@@ -104,8 +105,8 @@ async def trial_start(callback: types.CallbackQuery):
         
         logger.info(f"Creating trial client for user {user_id}")
         
-        # Используем постоянный email для поиска существующего клиента
-        email = f"trial_{user_id}"
+        # Используем уникальный email с timestamp
+        email = f"trial_{user_id}_{int(time.time())}"
         
         if MOCK_MODE:
             client_id = f"mock_trial_{user_id}"
@@ -116,12 +117,12 @@ async def trial_start(callback: types.CallbackQuery):
                 await xui.close()
                 
                 if not client_id:
-                    logger.error(f"Failed to create/get client for user {user_id}")
+                    logger.error(f"Failed to create client for user {user_id}")
                     await callback.message.answer("❌ Ошибка при создании пробной подписки. Попробуйте позже.")
                     await callback.answer()
                     return
                 else:
-                    logger.info(f"Client UUID: {client_id} for user {user_id}")
+                    logger.info(f"Client created with UUID: {client_id}, email: {email}")
             except Exception as e:
                 logger.error(f"Error creating client: {e}")
                 await callback.message.answer("❌ Ошибка подключения к VPN серверу. Попробуйте позже.")
