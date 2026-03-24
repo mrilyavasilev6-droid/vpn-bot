@@ -104,26 +104,29 @@ async def trial_start(callback: types.CallbackQuery):
         
         logger.info(f"Creating trial client for user {user_id}")
         
+        # Используем постоянный email для поиска существующего клиента
+        email = f"trial_{user_id}"
+        
         if MOCK_MODE:
             client_id = f"mock_trial_{user_id}"
         else:
             try:
                 xui = XUIClient(XUI_HOST, XUI_USERNAME, XUI_PASSWORD)
-                client_id = await xui.add_client(trial_days, email=f"trial_{user_id}")
+                client_id = await xui.add_client(trial_days, email=email)
                 await xui.close()
                 
                 if not client_id:
-                    logger.error(f"Failed to create client for user {user_id}")
+                    logger.error(f"Failed to create/get client for user {user_id}")
                     await callback.message.answer("❌ Ошибка при создании пробной подписки. Попробуйте позже.")
                     await callback.answer()
                     return
+                else:
+                    logger.info(f"Client UUID: {client_id} for user {user_id}")
             except Exception as e:
                 logger.error(f"Error creating client: {e}")
                 await callback.message.answer("❌ Ошибка подключения к VPN серверу. Попробуйте позже.")
                 await callback.answer()
                 return
-        
-        logger.info(f"Client created: {client_id}")
         
         # Сохраняем в таблицу Trial
         trial = Trial(
@@ -158,7 +161,7 @@ async def trial_start(callback: types.CallbackQuery):
         
         await session.commit()
         
-        logger.info(f"Trial saved to DB for user {user_id}, expires at {trial_end}")
+        logger.info(f"Trial saved to DB for user {user_id}, expires at {trial_end}, client_id={client_id}")
         
         # Генерируем ссылку
         config_link = (
