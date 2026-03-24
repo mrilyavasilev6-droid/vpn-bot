@@ -6,7 +6,7 @@ from sqlalchemy import select, delete
 from database.session import AsyncSessionLocal
 from database.models import User, Trial, Subscription
 from vpn.xui import XUIClient
-from config import XUI_HOST, XUI_USERNAME, XUI_PASSWORD, MOCK_MODE, VPN_SERVER_IP, SERVERS
+from config import XUI_HOST, XUI_USERNAME, XUI_PASSWORD, MOCK_MODE, VPN_SERVER_IP, VPN_REALITY_PUBLIC_KEY, VPN_REALITY_SHORT_ID
 import logging
 
 router = Router()
@@ -108,17 +108,19 @@ async def trial_start(callback: types.CallbackQuery):
         # Используем уникальный email с timestamp
         email = f"trial_{user_id}_{int(time.time())}"
         
+        # Название сервера (можно вынести в config)
+        server_name = "Frankfurt"
+        
         if MOCK_MODE:
             client_id = f"mock_trial_{user_id}"
-            # Генерируем тестовые ссылки для всех серверов
-            all_configs = []
-            for s in SERVERS:
-                mock_config = f"vless://mock@{VPN_SERVER_IP}:{s['port']}?type=tcp&security=reality#MILF%20VPN%20-%20{s['name']}"
-                all_configs.append(mock_config)
+            plan_display_name = f"MILF VPN - {server_name} (Trial)"
+            config_link = f"vless://mock@{VPN_SERVER_IP}:443?type=tcp&security=reality#{plan_display_name.replace(' ', '_')}"
+            sub_link = f"http://87.242.86.245:49828/bJGC3webPGJwCrGw5e/sub/{client_id}"
         else:
             try:
                 xui = XUIClient(XUI_HOST, XUI_USERNAME, XUI_PASSWORD)
-                client_id = await xui.add_client(trial_days, email=email)
+                # Добавляем клиента во все инбаунды
+                client_id = await xui.add_client_to_all_inbounds(trial_days, email=email)
                 await xui.close()
                 
                 if not client_id:
@@ -128,13 +130,8 @@ async def trial_start(callback: types.CallbackQuery):
                     return
                 else:
                     logger.info(f"Client created with UUID: {client_id}, email: {email}")
-                    
-                    # Генерируем ссылки для всех серверов
-                    xui2 = XUIClient(XUI_HOST, XUI_USERNAME, XUI_PASSWORD)
-                    plan_display_name = "MILF VPN - Trial"
-                    all_configs = await xui2.get_all_server_configs(client_id, plan_display_name)
-                    await xui2.close()
-                    
+                    plan_display_name = f"MILF VPN - {server_name} (Trial)"
+                    sub_link = f"http://87.242.86.245:49828/bJGC3webPGJwCrGw5e/sub/{client_id}"
             except Exception as e:
                 logger.error(f"Error creating client: {e}")
                 await callback.message.answer("❌ Ошибка подключения к VPN серверу. Попробуйте позже.")
@@ -179,12 +176,7 @@ async def trial_start(callback: types.CallbackQuery):
         end_date_str = trial_end.strftime('%d.%m.%Y')
         end_time_str = trial_end.strftime('%H:%M')
         
-        # Формируем список серверов
-        servers_text = "\n".join([f"• {s['name']}" for s in SERVERS])
-        
-        # Клавиатура с кнопкой добавить все серверы
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🌍 Добавить все серверы", callback_data=f"add_all_{client_id}")],
             [InlineKeyboardButton(text="📖 Инструкция", callback_data="instructions")],
             [InlineKeyboardButton(text="👤 Личный кабинет", callback_data="profile")],
             [InlineKeyboardButton(text="◀ Главное меню", callback_data="main_menu")]
@@ -192,15 +184,16 @@ async def trial_start(callback: types.CallbackQuery):
         
         await callback.message.answer(
             f"🎉 *Пробный период 3 дня активирован!*\n\n"
+            f"🔗 *Ваша ссылка-подписка:*\n`{sub_link}`\n\n"
             f"📅 *Действует до:* {end_date_str} в {end_time_str} МСК\n\n"
-            f"🌍 *Доступные серверы:*\n{servers_text}\n\n"
-            f"🔗 Нажмите кнопку ниже, чтобы добавить ВСЕ серверы в приложение V2RayNG / Streisand:\n\n"
-            f"📱 *Как подключиться:*\n"
-            f"1️⃣ Нажмите кнопку «Добавить все серверы»\n"
-            f"2️⃣ Появятся 5 ссылок — нажмите на каждую\n"
-            f"3️⃣ Приложение откроется автоматически\n"
-            f"4️⃣ Нажмите ▶️ для подключения\n\n"
-            f"Инструкцию можно найти в меню «Инструкция»",
+            f"📱 *Как добавить в V2RayNG:*\n"
+            f"1️⃣ Скачайте V2RayNG (Android) или Streisand (iOS)\n"
+            f"2️⃣ Нажмите + → Add Subscription\n"
+            f"3️⃣ Вставьте ссылку\n"
+            f"4️⃣ Нажмите обновить\n\n"
+            f"✨ Доступные серверы:\n"
+            f"🇩🇪 Германия | 🇮🇳 Индия | 🇷🇺 Россия СПБ | 🇮🇹 Италия | 🇹🇷 Турция\n\n"
+            f"📖 Подробная инструкция: /instructions",
             reply_markup=keyboard,
             parse_mode="Markdown"
         )
