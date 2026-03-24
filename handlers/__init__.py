@@ -8,3 +8,4 @@ from .referral import router as referral_router
 from .admin import router as admin_router
 from .payments import router as payments_router
 from .vpn import router as vpn_router
+from .feedback import router as feedback_router
