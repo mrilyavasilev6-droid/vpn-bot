@@ -7,7 +7,8 @@ from database.session import init_db
 from handlers import (
     start, main_menu, trial, instructions, subscription, profile, referral, admin, payments
 )
-from handlers.vpn import router as vpn_router  # ← ДОБАВИТЬ импорт VPN роутера
+from handlers.vpn import router as vpn_router
+from handlers.feedback import router as feedback_router  # ← ДОБАВИТЬ
 from utils.scheduler import start_scheduler
 
 
@@ -23,8 +24,8 @@ async def start_http_server():
     await runner.setup()
     site = web.TCPSite(runner, '0.0.0.0', 10000)
     await site.start()
-    # Бесконечное ожидание без ошибок
-    await asyncio.Future()  # ← ИСПРАВЛЕНО: вместо Event().wait()
+    while True:
+        await asyncio.sleep(3600)
 
 
 async def main():
@@ -44,7 +45,8 @@ async def main():
         referral.router,
         admin.router,
         payments.router,
-        vpn_router,  # ← ДОБАВИТЬ VPN роутер
+        vpn_router,
+        feedback_router,  # ← ДОБАВИТЬ СЮДА
     )
 
     # Запускаем HTTP-сервер для health check
