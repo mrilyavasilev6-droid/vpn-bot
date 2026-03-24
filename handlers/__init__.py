@@ -7,3 +7,4 @@ from .profile import router as profile_router
 from .referral import router as referral_router
 from .admin import router as admin_router
 from .payments import router as payments_router
+from .vpn import router as vpn_router
