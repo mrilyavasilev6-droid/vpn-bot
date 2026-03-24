@@ -31,7 +31,7 @@ async def instructions_start(callback: types.CallbackQuery):
         [InlineKeyboardButton(text="◀ Назад", callback_data="main_menu")]
     ])
     
-    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
+    await callback.message.answer(text, reply_markup=keyboard, parse_mode="Markdown")
     await callback.answer()
 
 
@@ -46,7 +46,7 @@ async def choose_platform(callback: types.CallbackQuery):
         [InlineKeyboardButton(text="◀ Назад", callback_data="instructions")]
     ])
     
-    await callback.message.edit_text(
+    await callback.message.answer(
         "📱 *Выберите вашу платформу:*\n\n"
         "Нажмите на кнопку с вашим устройством, чтобы получить ссылку на приложение и инструкцию.",
         reply_markup=keyboard,
@@ -124,7 +124,7 @@ async def show_platform_instruction(callback: types.CallbackQuery):
         [InlineKeyboardButton(text="◀ Главное меню", callback_data="main_menu")]
     ])
     
-    await callback.message.edit_text(
+    await callback.message.answer(
         instructions,
         reply_markup=keyboard,
         parse_mode="Markdown",
