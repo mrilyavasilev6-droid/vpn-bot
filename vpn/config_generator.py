@@ -36,10 +36,8 @@ def generate_vless_link(client_uuid: str, config: VPNConfig, name: str = None) -
     Returns:
         vless:// ссылка
     """
-    # Базовый URL
     base = f"vless://{client_uuid}@{config.server_ip}:{config.port}"
     
-    # Параметры
     params = {
         "type": "tcp",
         "security": "reality",
@@ -49,10 +47,8 @@ def generate_vless_link(client_uuid: str, config: VPNConfig, name: str = None) -
         "sid": config.short_id
     }
     
-    # Собираем параметры в строку
     param_str = "&".join([f"{k}={v}" for k, v in params.items()])
     
-    # Добавляем название (если есть)
     if name:
         encoded_name = urllib.parse.quote(name)
         return f"{base}?{param_str}#{encoded_name}"
@@ -61,19 +57,5 @@ def generate_vless_link(client_uuid: str, config: VPNConfig, name: str = None) -
 
 
 def get_subscription_link(client_uuid: str, panel_url: str, username: str, password: str) -> str:
-    """
-    Сгенерировать ссылку на подписку (для клиентов)
-    
-    Args:
-        client_uuid: UUID клиента
-        panel_url: URL панели управления
-        username: логин панели
-        password: пароль панели
-    
-    Returns:
-        ссылка на подписку
-    """
-    # В 3x-ui подписка доступна по адресу /panel/api/inbounds/getClientTraffic?id={uuid}
-    # Но для клиентов обычно используется другой формат
-    # Это пример, уточните формат в вашей версии 3x-ui
+    """Сгенерировать ссылку на подписку (для клиентов)"""
     return f"{panel_url}/subscribe/{client_uuid}"
