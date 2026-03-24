@@ -1,101 +1,159 @@
 from aiogram import Router, types
-from aiogram.types import LabeledPrice, PreCheckoutQuery
-from config import PROVIDER_TOKEN
+from aiogram.types import LabeledPrice, PreCheckoutQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.fsm.context import FSMContext
+from config import PROVIDER_TOKEN, MOCK_MODE
 from database.session import AsyncSessionLocal
-from database.models import Plan, User, Subscription, Server, ReferralBonus, Transaction
+from database.crud import get_plan, get_least_loaded_server, add_subscription, add_transaction, get_user
 from vpn.xui import XUIClient
 import datetime
+import logging
 
 router = Router()
+
 
 @router.pre_checkout_query()
 async def pre_checkout(pre_checkout_query: PreCheckoutQuery):
     await pre_checkout_query.answer(ok=True)
 
+
 @router.message(lambda m: m.successful_payment)
 async def successful_payment(message: types.Message):
+    """Обработка успешного платежа"""
     payment = message.successful_payment
-    payload = payment.invoice_payload  # 'plan_123_456'
-    _, plan_id_str, user_id_str = payload.split('_')
-    plan_id = int(plan_id_str)
-    user_id = int(user_id_str)
+    payload = payment.invoice_payload
+    
+    try:
+        # Формат payload: "plan_{plan_id}_{user_id}"
+        _, plan_id_str, user_id_str = payload.split('_')
+        plan_id = int(plan_id_str)
+        user_id = int(user_id_str)
+    except Exception as e:
+        logging.error(f"Error parsing payload: {e}")
+        await message.answer("❌ Ошибка обработки платежа. Обратитесь к администратору.")
+        return
 
     async with AsyncSessionLocal() as session:
-        # Сохраняем транзакцию
-        tx = Transaction(
-            user_id=user_id,
-            amount=payment.total_amount,
-            currency=payment.currency,
-            payment_method='yookassa',
-            status='completed',
-            telegram_payload=str(payment)
-        )
-        session.add(tx)
-
-        plan = await session.get(Plan, plan_id)
+        # Получаем тариф
+        plan = await get_plan(session, plan_id)
         if not plan:
-            await message.answer("Ошибка: тариф не найден")
+            await message.answer("❌ Тариф не найден.")
             return
-
-        # Выбираем сервер
-        servers = await session.execute(
-            select(Server).where(Server.max_clients > Server.current_clients)
-        )
-        servers = servers.scalars().all()
-        if not servers:
-            await message.answer("Нет доступных серверов. Обратитесь к администратору.")
+        
+        # Получаем пользователя
+        user = await get_user(session, user_id)
+        if not user:
+            await message.answer("❌ Пользователь не найден.")
             return
-        server = min(servers, key=lambda s: s.current_clients / s.max_clients if s.max_clients else 0)
-
-        # Создаём клиента на сервере
-        xui = XUIClient(server.api_url, server.api_username, server.api_password)
-        client_id = await xui.add_client(plan.duration_days)
-        if not client_id:
-            await message.answer("Ошибка создания подписки. Попробуйте позже.")
-            return
-
-        server.current_clients += 1
-
-        end_date = datetime.datetime.now() + datetime.timedelta(days=plan.duration_days)
-        subscription = Subscription(
-            user_id=user_id,
-            plan_id=plan_id,
-            client_id=client_id,
-            server_id=server.id,
-            end_date=end_date,
-            is_active=True
-        )
-        session.add(subscription)
-
-        # Реферальная система: начисляем бонус рефереру
-        user = await session.get(User, user_id)
-        if user and user.referral_by:
-            existing = await session.execute(
-                select(ReferralBonus).where(ReferralBonus.referred_id == user_id)
+        
+        # Получаем сервер (если используется несколько)
+        server = await get_least_loaded_server(session)
+        
+        from config import XUI_HOST, XUI_USERNAME, XUI_PASSWORD, VPN_SERVER_IP
+        
+        # Создаем клиента в панели
+        xui = XUIClient(XUI_HOST, XUI_USERNAME, XUI_PASSWORD)
+        
+        if MOCK_MODE:
+            # Тестовый режим
+            client_id = f"mock_{user_id}_{datetime.datetime.now().timestamp()}"
+            config_link = f"vless://mock@{VPN_SERVER_IP}:443?type=tcp&security=reality#Mock_{plan.name}"
+        else:
+            client_id = await xui.add_client(plan.duration_days, email=f"tg_{user_id}")
+            if not client_id:
+                await message.answer("❌ Ошибка создания подписки. Попробуйте позже.")
+                await xui.close()
+                return
+            
+            # Генерируем ссылку для подключения
+            config_link = await xui.get_client_config(
+                client_uuid=client_id,
+                server_host=VPN_SERVER_IP,
+                plan_name=plan.name
             )
-            if not existing.scalar_one_or_none():
-                referrer = await session.get(User, user.referral_by)
-                # Начисляем 7 дней к подписке реферера
-                referrer_sub = await session.execute(
-                    select(Subscription).where(Subscription.user_id == user.referral_by, Subscription.is_active == True)
-                )
-                referrer_sub = referrer_sub.scalar_one_or_none()
-                if referrer_sub:
-                    referrer_sub.end_date += datetime.timedelta(days=7)
-                else:
-                    # Создаём подписку на 7 дней (без плана)
-                    # Можно использовать план с duration=7, если есть
-                    pass
-                bonus = ReferralBonus(referrer_id=user.referral_by, referred_id=user_id, bonus_days=7)
-                session.add(bonus)
-
+        
+        # Сохраняем подписку в БД
+        end_date = datetime.datetime.now() + datetime.timedelta(days=plan.duration_days)
+        await add_subscription(
+            session, 
+            user_id, 
+            plan_id, 
+            client_id, 
+            server.id if server else 1, 
+            end_date
+        )
+        
+        # Сохраняем транзакцию
+        await add_transaction(
+            session, 
+            user_id, 
+            payment.total_amount, 
+            payment.currency, 
+            'stars', 
+            str(payment)
+        )
+        
         await session.commit()
+        
+        # Если сервер существует, обновляем количество клиентов
+        if server and not MOCK_MODE:
+            server.current_clients += 1
+            await session.commit()
+        
+        await xui.close()
+        
+        # Клавиатура с кнопкой открыть ссылку
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📱 Открыть в V2RayNG", url=config_link)],
+            [InlineKeyboardButton(text="📋 Копировать ссылку", callback_data=f"copy_link_{client_id}")],
+            [InlineKeyboardButton(text="◀ Главное меню", callback_data="main_menu")]
+        ])
+        
+        await message.answer(
+            f"✅ *Подписка {plan.name} активирована!*\n\n"
+            f"📅 Действует до: {end_date.strftime('%d.%m.%Y')}\n\n"
+            f"🔗 Нажмите на кнопку, чтобы импортировать конфигурацию в приложение V2RayNG или Streisand:\n\n"
+            f"📱 *Инструкция:*\n"
+            f"1. Скачайте V2RayNG (Android) или Streisand (iOS)\n"
+            f"2. Нажмите + → Import from clipboard\n"
+            f"3. Вставьте ссылку\n"
+            f"4. Нажмите ▶️ для подключения",
+            reply_markup=keyboard,
+            parse_mode="Markdown"
+        )
 
-    # Получаем конфиг (реализовать в xui)
-    config_data = await xui.get_client_config(client_id)  # заглушка
 
-    await message.answer(f"Подписка активирована до {end_date.strftime('%d.%m.%Y')}.")
-    await message.answer_document(
-        types.BufferedInputFile(config_data.encode('utf-8'), filename="config.conf"),
-        caption="Ваш конфигурационный файл"
-    )
+@router.callback_query(lambda c: c.data.startswith("copy_link_"))
+async def copy_link_callback(callback: types.CallbackQuery):
+    """Обработка кнопки копирования ссылки"""
+    client_id = callback.data.split("_")[2]
+    
+    async with AsyncSessionLocal() as session:
+        from database.models import Subscription, Plan
+        from sqlalchemy import select
+        
+        result = await session.execute(
+            select(Subscription, Plan)
+            .join(Plan, Subscription.plan_id == Plan.id)
+            .where(Subscription.client_id == client_id)
+        )
+        sub_plan = result.first()
+        
+        if sub_plan:
+            sub, plan = sub_plan
+            from config import VPN_SERVER_IP
+            
+            xui = XUIClient(None, None, None)  # Не нужно для генерации ссылки
+            config_link = await xui.get_client_config(
+                client_uuid=client_id,
+                server_host=VPN_SERVER_IP,
+                plan_name=plan.name
+            )
+            
+            await callback.answer()
+            await callback.message.answer(
+                f"🔗 *Ваша ссылка:*\n`{config_link}`\n\n"
+                f"Скопируйте её и вставьте в приложение V2RayNG.",
+                parse_mode="Markdown"
+            )
+        else:
+            await callback.answer("Подписка не найдена", show_alert=True)
