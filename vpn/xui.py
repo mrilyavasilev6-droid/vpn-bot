@@ -200,6 +200,7 @@ class XUIClient:
 
     async def get_client_all_inbounds(self, client_uuid: str) -> Optional[Dict]:
         """Получить суммарную информацию о клиенте по всем инбаундам"""
+        # Список всех инбаундов
         inbounds = [2, 3, 4, 5, 6]
         total_up = 0
         total_down = 0
@@ -209,6 +210,7 @@ class XUIClient:
             if result and result.get('success') and result.get('obj'):
                 total_up += result['obj'].get('up', 0)
                 total_down += result['obj'].get('down', 0)
+                logger.debug(f"Traffic from inbound {inbound_id}: up={result['obj'].get('up', 0)}, down={result['obj'].get('down', 0)}")
         
         if total_up > 0 or total_down > 0:
             return {
