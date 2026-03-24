@@ -1,6 +1,7 @@
 from aiogram import Router, types
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
 from aiogram.filters import Command
+import os
 
 router = Router()
 
@@ -28,7 +29,22 @@ async def show_main_menu(message: types.Message):
         "- 🔒 Полная конфиденциальность\n\n"
         "✨ *Оформи пробный период — 3 дня в подарок. Оцени скорость и надёжность, прежде чем выбрать тариф.*"
     )
-    await message.answer(text, reply_markup=get_main_menu_keyboard(), parse_mode="Markdown")
+    
+    # Путь к картинке
+    photo_path = os.path.join("assets", "banner-vpn-bot.png")
+    
+    try:
+        photo = FSInputFile(photo_path)
+        await message.answer_photo(
+            photo=photo,
+            caption=text,
+            reply_markup=get_main_menu_keyboard(),
+            parse_mode="Markdown"
+        )
+    except Exception as e:
+        # Если ошибка — отправляем без картинки
+        await message.answer(text, reply_markup=get_main_menu_keyboard(), parse_mode="Markdown")
+        print(f"Error loading image: {e}")
 
 
 @router.callback_query(lambda c: c.data == "main_menu")
