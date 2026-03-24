@@ -38,7 +38,7 @@ async def trial_start(callback: types.CallbackQuery):
             await callback.answer()
             return
         
-        # Проверяем активную триальную подписку
+        # Проверяем активный пробный период в таблице Trial
         active_trial = await session.execute(
             select(Trial).where(
                 Trial.user_id == user_id,
@@ -49,15 +49,23 @@ async def trial_start(callback: types.CallbackQuery):
         active_trial = active_trial.scalar_one_or_none()
         
         if active_trial:
-            logger.info(f"User {user_id} already has active trial until {active_trial.end_date}")
+            # Если есть активный пробный период, показываем информацию
+            end_date = active_trial.end_date.strftime('%d.%m.%Y')
             await callback.message.answer(
-                f"✅ У вас уже активен пробный период!\n\n"
-                f"📅 Действует до: {active_trial.end_date.strftime('%d.%m.%Y')}\n\n"
-                f"🔑 Нажмите «Инструкция» → «Получить ключ»."
+                f"✅ *У вас уже активен пробный период!*\n\n"
+                f"📅 Действует до: {end_date}\n\n"
+                f"🔑 Нажмите «Инструкция» → «Получить ключ».",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="📖 Инструкция", callback_data="instructions")],
+                    [InlineKeyboardButton(text="👤 Личный кабинет", callback_data="profile")],
+                    [InlineKeyboardButton(text="◀ Назад", callback_data="main_menu")]
+                ]),
+                parse_mode="Markdown"
             )
             await callback.answer()
             return
         
+        # Проверяем, не использовал ли пользователь пробный период раньше
         if user and user.trial_used:
             logger.info(f"User {user_id} already used trial before")
             await callback.message.answer("❌ Вы уже использовали пробный период. Оформите платную подписку.")
@@ -85,15 +93,20 @@ async def trial_start(callback: types.CallbackQuery):
         
         logger.info(f"Client created: {client_id}")
         
-        # Сохраняем в БД
-        trial = Trial(user_id=user_id, end_date=trial_end, is_active=True)
+        # Сохраняем в таблицу Trial
+        trial = Trial(
+            user_id=user_id,
+            end_date=trial_end,
+            is_active=True
+        )
         session.add(trial)
+        await session.flush()  # Получаем trial.id
         
-        # Создаём запись в подписках
+        # Сохраняем в таблицу Subscription с client_id
         subscription = Subscription(
             user_id=user_id,
-            plan_id=None,
-            client_id=client_id,
+            plan_id=None,  # пробный период без плана
+            client_id=client_id,  # сохраняем UUID клиента
             server_id=1,
             start_date=datetime.now(),
             end_date=trial_end,
@@ -101,6 +114,7 @@ async def trial_start(callback: types.CallbackQuery):
         )
         session.add(subscription)
         
+        # Обновляем пользователя
         if user:
             user.trial_used = True
             user.trial_end_date = trial_end
@@ -112,7 +126,7 @@ async def trial_start(callback: types.CallbackQuery):
         
         await session.commit()
         
-        logger.info(f"Trial saved to DB for user {user_id}, expires at {trial_end}")
+        logger.info(f"Trial saved to DB for user {user_id}, expires at {trial_end}, client_id={client_id}")
         
         # Генерируем ссылку
         config_link = (
@@ -123,7 +137,6 @@ async def trial_start(callback: types.CallbackQuery):
             f"#Trial"
         )
         
-        # Показываем результат
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📖 Инструкция", callback_data="instructions")],
             [InlineKeyboardButton(text="👤 Личный кабинет", callback_data="profile")],
@@ -135,10 +148,10 @@ async def trial_start(callback: types.CallbackQuery):
             f"🔑 *Ваш ключ:*\n`{config_link}`\n\n"
             f"📅 Действует до: {trial_end.strftime('%d.%m.%Y')}\n\n"
             f"📱 *Как подключиться:*\n"
-            f"1. Скачайте V2RayNG (Android) или Streisand (iOS)\n"
-            f"2. Нажмите + → Import from clipboard\n"
-            f"3. Вставьте ссылку\n"
-            f"4. Нажмите ▶️ для подключения\n\n"
+            f"1️⃣ Скачайте V2RayNG (Android) или Streisand (iOS)\n"
+            f"2️⃣ Нажмите + → Import from clipboard\n"
+            f"3️⃣ Вставьте ссылку\n"
+            f"4️⃣ Нажмите ▶️ для подключения\n\n"
             f"Инструкцию можно найти в меню «Инструкция»",
             reply_markup=keyboard,
             parse_mode="Markdown"
