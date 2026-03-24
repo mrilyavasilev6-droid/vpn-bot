@@ -1,7 +1,7 @@
 from aiogram import Router, types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from datetime import datetime, timedelta
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from database.session import AsyncSessionLocal
 from database.models import User, Trial, Subscription
 from vpn.xui import XUIClient
@@ -23,22 +23,45 @@ async def trial_start(callback: types.CallbackQuery):
         user = await session.get(User, user_id)
         
         # Проверяем активную платную подписку
-        active_sub = await session.execute(
+        active_paid = await session.execute(
             select(Subscription).where(
                 Subscription.user_id == user_id,
                 Subscription.is_active == True,
-                Subscription.end_date > datetime.now()
+                Subscription.end_date > datetime.now(),
+                Subscription.plan_id != None
             )
         )
-        active_sub = active_sub.scalar_one_or_none()
+        active_paid = active_paid.scalar_one_or_none()
         
-        if active_sub:
-            logger.info(f"User {user_id} already has active subscription")
-            await callback.message.answer("❌ У вас уже есть активная платная подписка!")
+        if active_paid:
+            await callback.message.answer(
+                "❌ У вас уже есть активная *платная* подписка.\n\n"
+                "Пробный период доступен только для новых пользователей.",
+                parse_mode="Markdown"
+            )
             await callback.answer()
             return
         
-        # Проверяем активный пробный период в таблице Trial
+        # Удаляем старые неактивные пробные периоды
+        await session.execute(
+            delete(Trial).where(
+                Trial.user_id == user_id,
+                Trial.is_active == False
+            )
+        )
+        
+        # Удаляем старые неактивные подписки (пробные)
+        await session.execute(
+            delete(Subscription).where(
+                Subscription.user_id == user_id,
+                Subscription.plan_id == None,
+                Subscription.is_active == False
+            )
+        )
+        
+        await session.commit()
+        
+        # Проверяем активный пробный период
         active_trial = await session.execute(
             select(Trial).where(
                 Trial.user_id == user_id,
@@ -49,11 +72,11 @@ async def trial_start(callback: types.CallbackQuery):
         active_trial = active_trial.scalar_one_or_none()
         
         if active_trial:
-            # Если есть активный пробный период, показываем информацию
             end_date = active_trial.end_date.strftime('%d.%m.%Y')
+            end_time = active_trial.end_date.strftime('%H:%M')
             await callback.message.answer(
                 f"✅ *У вас уже активен пробный период!*\n\n"
-                f"📅 Действует до: {end_date}\n\n"
+                f"📅 Действует до: {end_date} в {end_time} МСК\n\n"
                 f"🔑 Нажмите «Инструкция» → «Получить ключ».",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                     [InlineKeyboardButton(text="📖 Инструкция", callback_data="instructions")],
@@ -65,10 +88,13 @@ async def trial_start(callback: types.CallbackQuery):
             await callback.answer()
             return
         
-        # Проверяем, не использовал ли пользователь пробный период раньше
+        # Проверяем, использовал ли пользователь пробный период раньше
         if user and user.trial_used:
-            logger.info(f"User {user_id} already used trial before")
-            await callback.message.answer("❌ Вы уже использовали пробный период. Оформите платную подписку.")
+            await callback.message.answer(
+                "❌ Вы уже использовали пробный период.\n\n"
+                "💎 Оформите платную подписку в разделе «Выбрать тариф».",
+                parse_mode="Markdown"
+            )
             await callback.answer()
             return
         
@@ -81,13 +107,19 @@ async def trial_start(callback: types.CallbackQuery):
         if MOCK_MODE:
             client_id = f"mock_trial_{user_id}"
         else:
-            xui = XUIClient(XUI_HOST, XUI_USERNAME, XUI_PASSWORD)
-            client_id = await xui.add_client(trial_days, email=f"trial_{user_id}")
-            await xui.close()
-            
-            if not client_id:
-                logger.error(f"Failed to create client for user {user_id}")
-                await callback.message.answer("❌ Ошибка при создании пробной подписки. Попробуйте позже.")
+            try:
+                xui = XUIClient(XUI_HOST, XUI_USERNAME, XUI_PASSWORD)
+                client_id = await xui.add_client(trial_days, email=f"trial_{user_id}")
+                await xui.close()
+                
+                if not client_id:
+                    logger.error(f"Failed to create client for user {user_id}")
+                    await callback.message.answer("❌ Ошибка при создании пробной подписки. Попробуйте позже.")
+                    await callback.answer()
+                    return
+            except Exception as e:
+                logger.error(f"Error creating client: {e}")
+                await callback.message.answer("❌ Ошибка подключения к VPN серверу. Попробуйте позже.")
                 await callback.answer()
                 return
         
@@ -100,13 +132,13 @@ async def trial_start(callback: types.CallbackQuery):
             is_active=True
         )
         session.add(trial)
-        await session.flush()  # Получаем trial.id
+        await session.flush()
         
-        # Сохраняем в таблицу Subscription с client_id
+        # Сохраняем в таблицу Subscription
         subscription = Subscription(
             user_id=user_id,
-            plan_id=None,  # пробный период без плана
-            client_id=client_id,  # сохраняем UUID клиента
+            plan_id=None,
+            client_id=client_id,
             server_id=1,
             start_date=datetime.now(),
             end_date=trial_end,
@@ -126,7 +158,7 @@ async def trial_start(callback: types.CallbackQuery):
         
         await session.commit()
         
-        logger.info(f"Trial saved to DB for user {user_id}, expires at {trial_end}, client_id={client_id}")
+        logger.info(f"Trial saved to DB for user {user_id}, expires at {trial_end}")
         
         # Генерируем ссылку
         config_link = (
@@ -137,6 +169,9 @@ async def trial_start(callback: types.CallbackQuery):
             f"#Trial"
         )
         
+        end_date_str = trial_end.strftime('%d.%m.%Y')
+        end_time_str = trial_end.strftime('%H:%M')
+        
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📖 Инструкция", callback_data="instructions")],
             [InlineKeyboardButton(text="👤 Личный кабинет", callback_data="profile")],
@@ -146,7 +181,7 @@ async def trial_start(callback: types.CallbackQuery):
         await callback.message.answer(
             f"🎉 *Пробный период 3 дня активирован!*\n\n"
             f"🔑 *Ваш ключ:*\n`{config_link}`\n\n"
-            f"📅 Действует до: {trial_end.strftime('%d.%m.%Y')}\n\n"
+            f"📅 *Действует до:* {end_date_str} в {end_time_str} МСК\n\n"
             f"📱 *Как подключиться:*\n"
             f"1️⃣ Скачайте V2RayNG (Android) или Streisand (iOS)\n"
             f"2️⃣ Нажмите + → Import from clipboard\n"
