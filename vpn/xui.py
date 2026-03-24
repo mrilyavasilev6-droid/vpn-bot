@@ -29,23 +29,31 @@ class XUIClient:
         """Авторизация в панели"""
         session = await self._get_session()
         
-        # Получаем cookies
-        async with session.get(f"{self.api_url}/login") as resp:
-            pass
-        
         data = {"username": self.username, "password": self.password}
         
         async with session.post(f"{self.api_url}/login", data=data) as resp:
+            logger.info(f"Login response status: {resp.status}")
+            
             if resp.status == 200:
                 self._cookies = resp.cookies
                 logger.info("✅ Logged in to 3x-ui")
                 return True
-            logger.error(f"❌ Login failed: {resp.status}")
-            return False
+            else:
+                text = await resp.text()
+                logger.error(f"Login failed: {resp.status}, response: {text}")
+                return False
 
     async def _request(self, method: str, endpoint: str, data: Dict = None) -> Optional[Dict]:
         """Выполнить запрос к API"""
         session = await self._get_session()
+        
+        # Если нет cookies, логинимся
+        if not self._cookies:
+            logger.info("No cookies, logging in...")
+            await self._login()
+            if not self._cookies:
+                logger.error("Failed to login")
+                return None
         
         # Формируем заголовки
         headers = {}
@@ -55,6 +63,7 @@ class XUIClient:
         async with session.request(method, f"{self.api_url}{endpoint}", json=data, headers=headers) as resp:
             if resp.status == 401:
                 # Перелогиниваемся
+                logger.info("Got 401, re-logging...")
                 await self._login()
                 if self._cookies:
                     headers["Cookie"] = self._cookies.output(header='')
@@ -70,6 +79,8 @@ class XUIClient:
 
     async def add_client(self, days: int = 30, email: str = None) -> Optional[str]:
         """Создать нового клиента на сервере"""
+        logger.info(f"add_client called with days={days}, email={email}")
+        
         client_uuid = str(uuid.uuid4())
         expire_timestamp = int((datetime.now() + timedelta(days=days)).timestamp() * 1000)
         
@@ -91,7 +102,11 @@ class XUIClient:
             })
         }
         
+        logger.info(f"Sending payload to {self.api_url}/panel/api/inbounds/addClient")
+        
         result = await self._request('POST', '/panel/api/inbounds/addClient', payload)
+        
+        logger.info(f"Add client result: {result}")
         
         if result and result.get('success'):
             logger.info(f"✅ Client created: {client_uuid}")
