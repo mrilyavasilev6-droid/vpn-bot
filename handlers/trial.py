@@ -108,8 +108,12 @@ async def trial_start(callback: types.CallbackQuery):
         # Используем уникальный email с timestamp
         email = f"trial_{user_id}_{int(time.time())}"
         
+        # Название сервера (можно вынести в config)
+        server_name = "Frankfurt"
+        
         if MOCK_MODE:
             client_id = f"mock_trial_{user_id}"
+            plan_display_name = f"MILF VPN - {server_name} (Trial)"
         else:
             try:
                 xui = XUIClient(XUI_HOST, XUI_USERNAME, XUI_PASSWORD)
@@ -164,13 +168,15 @@ async def trial_start(callback: types.CallbackQuery):
         
         logger.info(f"Trial saved to DB for user {user_id}, expires at {trial_end}, client_id={client_id}")
         
-        # Генерируем ссылку
+        # Генерируем ссылку с красивым названием
+        plan_display_name = f"MILF VPN - Frankfurt (Trial)"
+        
         config_link = (
             f"vless://{client_id}@{VPN_SERVER_IP}:443"
             f"?type=tcp&security=reality"
             f"&pbk={VPN_REALITY_PUBLIC_KEY}&fp=chrome"
             f"&sni=www.cloudflare.com&sid={VPN_REALITY_SHORT_ID}"
-            f"#Trial"
+            f"#{plan_display_name}"
         )
         
         end_date_str = trial_end.strftime('%d.%m.%Y')
