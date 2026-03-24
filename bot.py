@@ -7,20 +7,25 @@ from database.session import init_db
 from handlers import (
     start, main_menu, trial, instructions, subscription, profile, referral, admin, payments
 )
+from handlers.vpn import router as vpn_router  # ← ДОБАВИТЬ импорт VPN роутера
 from utils.scheduler import start_scheduler
+
 
 async def health_check(request):
     return web.Response(text="OK")
 
+
 async def start_http_server():
+    """Запуск HTTP сервера для health check"""
     app = web.Application()
     app.router.add_get('/health', health_check)
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, '0.0.0.0', 10000)
     await site.start()
-    # Бесконечное ожидание
-    await asyncio.Event().wait()
+    # Бесконечное ожидание без ошибок
+    await asyncio.Future()  # ← ИСПРАВЛЕНО: вместо Event().wait()
+
 
 async def main():
     logging.basicConfig(level=logging.INFO)
@@ -38,10 +43,11 @@ async def main():
         profile.router,
         referral.router,
         admin.router,
-        payments.router
+        payments.router,
+        vpn_router,  # ← ДОБАВИТЬ VPN роутер
     )
 
-    # Запускаем HTTP-сервер для health check (чтобы Render не ругался)
+    # Запускаем HTTP-сервер для health check
     asyncio.create_task(start_http_server())
 
     # Запускаем планировщик
@@ -49,6 +55,7 @@ async def main():
 
     # Запускаем поллинг
     await dp.start_polling(bot)
+
 
 if __name__ == '__main__':
     asyncio.run(main())
