@@ -5,6 +5,7 @@ from database.models import User, ReferralBonus
 
 router = Router()
 
+
 @router.callback_query(lambda c: c.data == "referral")
 async def referral_info(callback: types.CallbackQuery):
     user_id = callback.from_user.id
@@ -28,9 +29,10 @@ async def referral_info(callback: types.CallbackQuery):
             [types.InlineKeyboardButton(text="Поделиться", url=f"https://t.me/share/url?url={ref_link}&text=Привет! Подключай быстрый VPN по моей ссылке:")],
             [types.InlineKeyboardButton(text="◀ Назад", callback_data="main_menu")]
         ])
-      try:
-    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
-except:
-    # Если не удалось отредактировать (например, сообщение с фото), отправляем новое
-    await callback.message.answer(text, reply_markup=keyboard, parse_mode="HTML")
+        
+        try:
+            await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+        except Exception:
+            await callback.message.answer(text, reply_markup=keyboard, parse_mode="HTML")
+            
     await callback.answer()
