@@ -1,9 +1,11 @@
 from datetime import datetime, timedelta
 from typing import Optional, Dict
-from loguru import logger
+import logging
 
-from .xui_client import XUIClient
+from .xui import XUIClient
 from .config_generator import generate_vless_link, VPNConfig
+
+logger = logging.getLogger(__name__)
 
 
 class SubscriptionManager:
@@ -13,7 +15,7 @@ class SubscriptionManager:
         self.xui = xui_client
         self.vpn_config = vpn_config
     
-    async def create_subscription(self, user_id: int, days: int = 30) -> Optional[Dict]:
+    async def create_subscription(self, user_id: int, days: int = 30, email: str = None) -> Optional[Dict]:
         """
         Создать новую подписку для пользователя
         
@@ -22,7 +24,7 @@ class SubscriptionManager:
         """
         try:
             # Создаем клиента на сервере
-            client_uuid = await self.xui.add_client(days)
+            client_uuid = await self.xui.add_client(days, email)
             
             if not client_uuid:
                 logger.error(f"Failed to create client for user {user_id}")
@@ -54,21 +56,8 @@ class SubscriptionManager:
     async def renew_subscription(self, client_uuid: str, days: int = 30) -> bool:
         """
         Продлить подписку
-        
-        В 3x-ui нет прямого API для продления, нужно:
-        1. Получить клиента
-        2. Обновить expireTime через API
         """
         try:
-            # Получаем клиента
-            client = await self.xui.get_client(client_uuid)
-            if not client:
-                logger.error(f"Client {client_uuid} not found")
-                return False
-            
-            # Обновляем expireTime (через API панели)
-            # Здесь нужно реализовать обновление через редактирование клиента
-            # В 3x-ui это POST /panel/api/inbounds/updateClient
             new_expire = int((datetime.now() + timedelta(days=days)).timestamp() * 1000)
             
             payload = {
