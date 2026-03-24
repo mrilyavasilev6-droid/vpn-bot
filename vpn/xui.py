@@ -4,7 +4,7 @@ import uuid
 import urllib.parse
 import os
 from datetime import datetime, timedelta
-from typing import Optional, Dict
+from typing import Optional, Dict, List
 import logging
 
 logger = logging.getLogger(__name__)
@@ -19,7 +19,7 @@ class XUIClient:
         self.password = password
         self._session = None
         self._cookies = None
-        self._inbound_id = 1  # ID инбаунда
+        self._inbound_id = 1  # ID инбаунда (основной, для создания клиентов)
         logger.info(f"XUIClient initialized with api_url: {self.api_url}")
 
     async def _get_session(self) -> aiohttp.ClientSession:
@@ -150,37 +150,52 @@ class XUIClient:
         self, 
         client_uuid: str, 
         server_host: str, 
+        server_port: int,
+        public_key: str,
+        short_id: str,
         plan_name: str,
-        public_key: str = None,
-        short_id: str = None,
-        sni: str = None
+        sni: str = "www.cloudflare.com",
+        fingerprint: str = "chrome"
     ) -> str:
-        """Сгенерировать vless:// ссылку для подключения"""
-        # Получаем из переменных окружения, если не переданы
-        pbk = public_key or os.getenv('VPN_REALITY_PUBLIC_KEY', '')
-        sid = short_id or os.getenv('VPN_REALITY_SHORT_ID', '')
-        sni_value = sni or os.getenv('VPN_REALITY_SNI', 'www.cloudflare.com')
-        
-        # Если всё ещё пусто — используем значения по умолчанию (из вашей панели)
-        if not pbk:
-            pbk = "NnIZ6QgJpOYfL7K7NuS4lWuDNdhRNOQlshTf6SK4O2Y"
-            logger.warning("Using default public key")
-        if not sid:
-            sid = "9020f7"
-            logger.warning("Using default short id")
-        
+        """Сгенерировать vless:// ссылку для одного сервера"""
         name = urllib.parse.quote(plan_name)
         
-        config = (
-            f"vless://{client_uuid}@{server_host}:443"
+        return (
+            f"vless://{client_uuid}@{server_host}:{server_port}"
             f"?type=tcp&security=reality"
-            f"&pbk={pbk}&fp=chrome"
-            f"&sni={sni_value}&sid={sid}"
+            f"&pbk={public_key}&fp={fingerprint}"
+            f"&sni={sni}&sid={short_id}"
             f"#{name}"
         )
+
+    async def get_all_server_configs(
+        self, 
+        client_uuid: str, 
+        plan_name: str,
+        servers: List[Dict] = None
+    ) -> List[str]:
+        """Сгенерировать ссылки для всех серверов"""
+        from config import SERVERS, VPN_SERVER_IP
         
-        logger.info(f"Generated config for {client_uuid}")
-        return config
+        if servers is None:
+            servers = SERVERS
+        
+        configs = []
+        for server in servers:
+            display_name = f"{plan_name} - {server['name']}"
+            config = await self.get_client_config(
+                client_uuid=client_uuid,
+                server_host=VPN_SERVER_IP,
+                server_port=server['port'],
+                public_key=server['public_key'],
+                short_id=server['short_id'],
+                plan_name=display_name,
+                sni=server.get('sni', 'www.cloudflare.com'),
+                fingerprint=server.get('fingerprint', 'chrome')
+            )
+            configs.append(config)
+        
+        return configs
 
     async def close(self):
         if self._session:
