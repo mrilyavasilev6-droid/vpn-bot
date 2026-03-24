@@ -63,8 +63,24 @@ class XUIClient:
                 logger.error(f"Request failed: {resp.status}")
                 return None
 
+    async def get_client_by_email(self, email: str) -> Optional[Dict]:
+        """Получить клиента по email"""
+        result = await self._request('GET', f'/panel/api/inbounds/getClientTraffic?email={email}')
+        if result and result.get('success') and result.get('obj'):
+            return result['obj']
+        return None
+
     async def add_client(self, days: int = 30, email: str = None) -> Optional[str]:
-        """Создать нового клиента на сервере"""
+        """Создать нового клиента на сервере или вернуть существующего"""
+        
+        # Если email указан, проверяем, есть ли уже такой клиент
+        if email:
+            existing_client = await self.get_client_by_email(email)
+            if existing_client:
+                logger.info(f"✅ Client already exists: {email}, UUID: {existing_client.get('id')}")
+                return existing_client.get('id')
+        
+        # Создаём нового клиента
         client_uuid = str(uuid.uuid4())
         expire_timestamp = int((datetime.now() + timedelta(days=days)).timestamp() * 1000)
         
@@ -86,10 +102,12 @@ class XUIClient:
             })
         }
         
+        logger.info(f"Sending add_client request for email: {email}")
+        
         result = await self._request('POST', '/panel/api/inbounds/addClient', payload)
         
         if result and result.get('success'):
-            logger.info(f"✅ Client created: {client_uuid}")
+            logger.info(f"✅ Client created: {client_uuid} (email: {email})")
             return client_uuid
         
         logger.error(f"❌ Failed to create client: {result}")
@@ -108,7 +126,7 @@ class XUIClient:
         return False
 
     async def get_client(self, client_uuid: str) -> Optional[Dict]:
-        """Получить информацию о клиенте"""
+        """Получить информацию о клиенте по UUID"""
         result = await self._request('GET', f'/panel/api/inbounds/getClientTraffic?id={client_uuid}')
         
         if result and result.get('success') and result.get('obj'):
