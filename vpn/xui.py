@@ -75,30 +75,12 @@ class XUIClient:
                 return await resp.json()
             else:
                 text = await resp.text()
-                logger.error(f"❌ Request failed: {resp.status}, response: {text}")
+                logger.error(f"❌ Request failed: {resp.status}, response: {text[:200]}")
                 return None
 
-    async def get_client_by_email(self, email: str) -> Optional[Dict]:
-        """Получить клиента по email"""
-        logger.info(f"Looking for client by email: {email}")
-        result = await self._request('GET', f'/panel/api/inbounds/getClientTraffic?email={email}')
-        if result and result.get('success') and result.get('obj'):
-            logger.info(f"Found client: {result['obj'].get('id')}")
-            return result['obj']
-        logger.info(f"Client with email {email} not found")
-        return None
-
     async def add_client(self, days: int = 30, email: str = None) -> Optional[str]:
-        """Создать нового клиента на сервере или вернуть существующего"""
+        """Создать нового клиента на сервере"""
         logger.info(f"📝 add_client called: days={days}, email={email}")
-        
-        # Если email указан, проверяем, есть ли уже такой клиент
-        if email:
-            existing_client = await self.get_client_by_email(email)
-            if existing_client:
-                client_uuid = existing_client.get('id')
-                logger.info(f"✅ Client already exists: {email}, UUID: {client_uuid}")
-                return client_uuid
         
         # Создаём нового клиента
         client_uuid = str(uuid.uuid4())
