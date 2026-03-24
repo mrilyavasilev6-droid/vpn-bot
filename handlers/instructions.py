@@ -43,8 +43,20 @@ async def get_active_subscription(session, user_id: int):
     if trial:
         logger.info(f"Found trial for user {user_id}, expires at {trial.end_date}")
         
-        # Создаём подписку из Trial (если нет связанной)
-        # Генерируем client_id на основе trial.id
+        # Ищем существующую подписку для пробного периода
+        existing_sub = await session.execute(
+            select(Subscription).where(
+                Subscription.user_id == user_id,
+                Subscription.plan_id == None,
+                Subscription.is_active == True
+            )
+        )
+        existing_sub = existing_sub.scalar_one_or_none()
+        
+        if existing_sub:
+            return existing_sub
+        
+        # Создаём подписку из Trial
         client_id = f"trial_{user_id}_{trial.id}"
         
         new_sub = Subscription(
@@ -210,6 +222,11 @@ async def get_vpn_key(callback: types.CallbackQuery):
         else:
             plan_name = "🔓 Пробный период"
         
+        # Форматируем дату и время
+        end_date = subscription.end_date
+        end_date_str = end_date.strftime('%d.%m.%Y')
+        end_time_str = end_date.strftime('%H:%M')
+        
         # Генерируем vless ссылку
         config_link = (
             f"vless://{subscription.client_id}@{VPN_SERVER_IP}:443"
@@ -227,7 +244,7 @@ async def get_vpn_key(callback: types.CallbackQuery):
         await callback.message.answer(
             f"🔑 *Ваш ключ подключения ({plan_name}):*\n\n"
             f"`{config_link}`\n\n"
-            f"📅 *Действует до:* {subscription.end_date.strftime('%d.%m.%Y')}\n\n"
+            f"📅 *Действует до:* {end_date_str} в {end_time_str} МСК\n\n"
             f"📱 *Как подключиться:*\n"
             f"1️⃣ Скопируйте ссылку\n"
             f"2️⃣ Откройте приложение V2RayNG / Streisand\n"
@@ -247,17 +264,42 @@ async def copy_link_callback(callback: types.CallbackQuery):
     client_id = callback.data.split("_")[2]
     
     async with AsyncSessionLocal() as session:
+        # Ищем подписку по client_id
         subscription = await session.execute(
             select(Subscription).where(Subscription.client_id == client_id)
         )
         subscription = subscription.scalar_one_or_none()
         
+        # Если не нашли, ищем по trial для пользователя
+        if not subscription and client_id.startswith('trial_'):
+            user_id = callback.from_user.id
+            subscription = await session.execute(
+                select(Subscription).where(
+                    Subscription.user_id == user_id,
+                    Subscription.plan_id == None,
+                    Subscription.is_active == True,
+                    Subscription.end_date > datetime.now()
+                )
+            )
+            subscription = subscription.scalar_one_or_none()
+        
         if not subscription:
-            await callback.answer("Подписка не найдена", show_alert=True)
+            await callback.answer("❌ Подписка не найдена", show_alert=True)
             return
         
-        plan_name = "Пробный период" if not subscription.plan_id else "VPN"
+        # Определяем название подписки
+        if subscription.plan_id:
+            plan = await get_plan(session, subscription.plan_id)
+            plan_name = plan.name if plan else "Подписка"
+        else:
+            plan_name = "🔓 Пробный период"
         
+        # Форматируем дату и время
+        end_date = subscription.end_date
+        end_date_str = end_date.strftime('%d.%m.%Y')
+        end_time_str = end_date.strftime('%H:%M')
+        
+        # Генерируем ссылку
         config_link = (
             f"vless://{subscription.client_id}@{VPN_SERVER_IP}:443"
             f"?type=tcp&security=reality"
@@ -268,9 +310,9 @@ async def copy_link_callback(callback: types.CallbackQuery):
         
         await callback.answer()
         await callback.message.answer(
-            f"🔗 *Ваша ссылка для подключения:*\n\n"
+            f"🔗 *Ваша ссылка для подключения ({plan_name}):*\n\n"
             f"`{config_link}`\n\n"
-            f"📅 Действует до: {subscription.end_date.strftime('%d.%m.%Y')}\n\n"
+            f"📅 *Действует до:* {end_date_str} в {end_time_str} МСК\n\n"
             f"Скопируйте её и вставьте в приложение V2RayNG / Streisand.",
             parse_mode="Markdown"
         )
