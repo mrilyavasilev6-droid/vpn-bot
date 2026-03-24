@@ -42,7 +42,22 @@ async def get_least_loaded_server(session: AsyncSession):
 
 
 async def get_user_active_subscription(session: AsyncSession, user_id: int):
-    """Получить активную подписку пользователя"""
+    """Получить активную платную подписку пользователя"""
+    now = datetime.datetime.now()
+    result = await session.execute(
+        select(Subscription)
+        .where(
+            Subscription.user_id == user_id,
+            Subscription.is_active == True,
+            Subscription.end_date > now,
+            Subscription.plan_id != None  # только платные подписки
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def get_user_any_active_subscription(session: AsyncSession, user_id: int):
+    """Получить любую активную подписку (платную или пробную)"""
     now = datetime.datetime.now()
     result = await session.execute(
         select(Subscription)
@@ -69,6 +84,26 @@ async def add_subscription(
         plan_id=plan_id,
         client_id=client_id,
         server_id=server_id,
+        end_date=end_date,
+        is_active=True
+    )
+    session.add(sub)
+    await session.commit()
+    return sub
+
+
+async def add_trial_subscription(
+    session: AsyncSession,
+    user_id: int,
+    client_id: str,
+    end_date: datetime.datetime
+):
+    """Добавить пробную подписку (без plan_id)"""
+    sub = Subscription(
+        user_id=user_id,
+        plan_id=None,
+        client_id=client_id,
+        server_id=1,
         end_date=end_date,
         is_active=True
     )
@@ -119,8 +154,8 @@ async def update_user_balance(session: AsyncSession, user_id: int, amount: int):
     await session.commit()
 
 
-async def add_trial(session: AsyncSession, user_id: int, days: int = 1):
-    """Добавить триальную подписку"""
+async def add_trial(session: AsyncSession, user_id: int, days: int = 3):
+    """Добавить триальную запись"""
     end_date = datetime.datetime.now() + datetime.timedelta(days=days)
     trial = Trial(
         user_id=user_id,
@@ -129,6 +164,7 @@ async def add_trial(session: AsyncSession, user_id: int, days: int = 1):
     )
     session.add(trial)
     await session.commit()
+    await session.refresh(trial)
     return trial
 
 
@@ -154,3 +190,68 @@ async def mark_trial_used(session: AsyncSession, user_id: int):
         .values(trial_used=True)
     )
     await session.commit()
+
+
+# ============ Промокоды (если понадобятся позже) ============
+
+async def create_promo_code(session: AsyncSession, code: str, days: int, max_uses: int = 1, created_by: int = None, expires_at: datetime.datetime = None):
+    """Создать промокод"""
+    from .models import PromoCode
+    promo = PromoCode(
+        code=code.upper(),
+        days=days,
+        max_uses=max_uses,
+        created_by=created_by,
+        expires_at=expires_at
+    )
+    session.add(promo)
+    await session.commit()
+    await session.refresh(promo)
+    return promo
+
+
+async def get_promo_code(session: AsyncSession, code: str):
+    """Получить промокод по коду"""
+    from .models import PromoCode
+    now = datetime.datetime.now()
+    result = await session.execute(
+        select(PromoCode).where(
+            PromoCode.code == code.upper(),
+            PromoCode.is_active == True,
+            PromoCode.used_count < PromoCode.max_uses,
+            (PromoCode.expires_at == None) | (PromoCode.expires_at > now)
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def use_promo_code(session: AsyncSession, promo_id: int, user_id: int) -> bool:
+    """Использовать промокод"""
+    from .models import PromoCode, PromoCodeUsage
+    # Проверяем, не использовал ли пользователь уже этот промокод
+    result = await session.execute(
+        select(PromoCodeUsage).where(
+            PromoCodeUsage.promo_id == promo_id,
+            PromoCodeUsage.user_id == user_id
+        )
+    )
+    if result.scalar_one_or_none():
+        return False
+    
+    # Записываем использование
+    usage = PromoCodeUsage(promo_id=promo_id, user_id=user_id)
+    session.add(usage)
+    
+    # Увеличиваем счётчик
+    promo = await session.get(PromoCode, promo_id)
+    promo.used_count += 1
+    
+    await session.commit()
+    return True
+
+
+async def get_all_promo_codes(session: AsyncSession):
+    """Получить все промокоды"""
+    from .models import PromoCode
+    result = await session.execute(select(PromoCode).order_by(PromoCode.created_at.desc()))
+    return result.scalars().all()
