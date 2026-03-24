@@ -122,6 +122,26 @@ async def deactivate_subscription(session: AsyncSession, subscription_id: int):
     await session.commit()
 
 
+async def get_subscription_by_client_id(session: AsyncSession, client_id: str):
+    """Получить подписку по client_id"""
+    result = await session.execute(
+        select(Subscription).where(Subscription.client_id == client_id)
+    )
+    return result.scalar_one_or_none()
+
+
+async def get_all_active_subscriptions(session: AsyncSession):
+    """Получить все активные подписки"""
+    now = datetime.datetime.now()
+    result = await session.execute(
+        select(Subscription).where(
+            Subscription.is_active == True,
+            Subscription.end_date > now
+        )
+    )
+    return result.scalars().all()
+
+
 async def add_transaction(
     session: AsyncSession, 
     user_id: int, 
@@ -192,7 +212,7 @@ async def mark_trial_used(session: AsyncSession, user_id: int):
     await session.commit()
 
 
-# ============ Промокоды (если понадобятся позже) ============
+# ============ Промокоды ============
 
 async def create_promo_code(session: AsyncSession, code: str, days: int, max_uses: int = 1, created_by: int = None, expires_at: datetime.datetime = None):
     """Создать промокод"""
