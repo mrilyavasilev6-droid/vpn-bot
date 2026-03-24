@@ -16,7 +16,7 @@ async def get_active_subscription(session, user_id: int):
     """Получить активную подписку (платную или пробную)"""
     now = datetime.now()
     
-    # 1. Ищем в Subscription
+    # Ищем в Subscription любую активную
     sub = await session.execute(
         select(Subscription).where(
             Subscription.user_id == user_id,
@@ -30,7 +30,7 @@ async def get_active_subscription(session, user_id: int):
         logger.info(f"Found subscription for user {user_id}, expires at {subscription.end_date}")
         return subscription
     
-    # 2. Если нет, ищем в Trial
+    # Если нет подписки, проверяем Trial
     trial = await session.execute(
         select(Trial).where(
             Trial.user_id == user_id,
@@ -42,36 +42,7 @@ async def get_active_subscription(session, user_id: int):
     
     if trial:
         logger.info(f"Found trial for user {user_id}, expires at {trial.end_date}")
-        
-        # Ищем существующую подписку для пробного периода
-        existing_sub = await session.execute(
-            select(Subscription).where(
-                Subscription.user_id == user_id,
-                Subscription.plan_id == None,
-                Subscription.is_active == True
-            )
-        )
-        existing_sub = existing_sub.scalar_one_or_none()
-        
-        if existing_sub:
-            return existing_sub
-        
-        # Создаём подписку из Trial
-        client_id = f"trial_{user_id}_{trial.id}"
-        
-        new_sub = Subscription(
-            user_id=user_id,
-            plan_id=None,
-            client_id=client_id,
-            server_id=1,
-            start_date=trial.start_date,
-            end_date=trial.end_date,
-            is_active=True
-        )
-        session.add(new_sub)
-        await session.commit()
-        logger.info(f"Created subscription from trial for user {user_id}, client_id={client_id}")
-        return new_sub
+        return None  # Нет активной подписки, нужно активировать заново
     
     return None
 
@@ -207,7 +178,7 @@ async def get_vpn_key(callback: types.CallbackQuery):
         subscription = await get_active_subscription(session, user_id)
         
         if not subscription:
-            logger.warning(f"No active subscription or trial for user {user_id}")
+            logger.warning(f"No active subscription for user {user_id}")
             await callback.answer(
                 "❌ У вас нет активной подписки.\n\n"
                 "Оформите пробный период или купите тариф в главном меню.",
@@ -270,13 +241,11 @@ async def copy_link_callback(callback: types.CallbackQuery):
         )
         subscription = subscription.scalar_one_or_none()
         
-        # Если не нашли, ищем по trial для пользователя
-        if not subscription and client_id.startswith('trial_'):
-            user_id = callback.from_user.id
+        # Если не нашли, ищем по user_id (для пробного периода)
+        if not subscription:
             subscription = await session.execute(
                 select(Subscription).where(
-                    Subscription.user_id == user_id,
-                    Subscription.plan_id == None,
+                    Subscription.user_id == callback.from_user.id,
                     Subscription.is_active == True,
                     Subscription.end_date > datetime.now()
                 )
