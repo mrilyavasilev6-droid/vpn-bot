@@ -93,7 +93,8 @@ async def show_profile(callback: types.CallbackQuery):
             [InlineKeyboardButton(text="◀ Назад", callback_data="main_menu")]
         ])
         
-        await callback.message.edit_text(
+        # Используем answer вместо edit_text
+        await callback.message.answer(
             profile_text,
             reply_markup=keyboard,
             parse_mode="Markdown"
