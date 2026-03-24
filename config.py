@@ -23,11 +23,59 @@ XUI_HOST = os.getenv('XUI_HOST')
 XUI_USERNAME = os.getenv('XUI_USERNAME')
 XUI_PASSWORD = os.getenv('XUI_PASSWORD')
 
-# VPN Server Settings
-VPN_SERVER_IP = os.getenv('VPN_SERVER_IP')
-VPN_REALITY_PUBLIC_KEY = os.getenv('VPN_REALITY_PUBLIC_KEY')
-VPN_REALITY_SHORT_ID = os.getenv('VPN_REALITY_SHORT_ID')
-VPN_REALITY_SNI = os.getenv('VPN_REALITY_SNI', 'www.cloudflare.com')
+# VPN Server Settings (основной IP)
+VPN_SERVER_IP = os.getenv('VPN_SERVER_IP', '87.242.86.245')
 
-# Mode
+# Режим работы (False = реальный VPN)
 MOCK_MODE = os.getenv('MOCK_MODE', 'True').lower() == 'true'
+
+# ============ СПИСОК СЕРВЕРОВ MILF VPN ============
+# Каждый сервер имеет свой порт, public key и short id
+
+SERVERS = [
+    {
+        'name': '🇩🇪 Германия',
+        'port': 443,
+        'public_key': 'wjC29exW1EQR879lFUmoJS9oXfOHCjfEAQcXuH1mIn8',
+        'short_id': '9ed461846d',  # первый из списка Short IDs
+        'sni': 'www.cloudflare.com',
+        'fingerprint': 'chrome'
+    },
+    {
+        'name': '🇮🇳 Индия',
+        'port': 444,
+        'public_key': 'ngBgVGz7Q9ATfpSHC2Svpfr5I_C2Bh5eKxzovFg0MmI',
+        'short_id': '004286430bfc',
+        'sni': 'www.cloudflare.com',
+        'fingerprint': 'chrome'
+    },
+    {
+        'name': '🇷🇺 Россия СПБ',
+        'port': 445,
+        'public_key': 'TPA3ve5H4rSxWxRYIcmBsVLSzEqbPWJt_iYaCPedPiM',
+        'short_id': '4415a4602b',
+        'sni': 'www.cloudflare.com',
+        'fingerprint': 'chrome'
+    },
+    {
+        'name': '🇮🇹 Италия',
+        'port': 446,
+        'public_key': 'GI7SadleegCX9tQAKEfI7JfNVmqgLi0MYzzIr1HhJjQ',
+        'short_id': 'f230491b99',
+        'sni': 'www.cloudflare.com',
+        'fingerprint': 'chrome'
+    },
+    {
+        'name': '🇹🇷 Турция',
+        'port': 447,
+        'public_key': 'cXCztbc9yw-3kp7PWsKAQ-TiNwBLrQQznF68ic_8ljE',
+        'short_id': '95',
+        'sni': 'www.cloudflare.com',
+        'fingerprint': 'chrome'
+    },
+]
+
+# Для обратной совместимости (основной сервер - Германия)
+VPN_REALITY_PUBLIC_KEY = SERVERS[0]['public_key']
+VPN_REALITY_SHORT_ID = SERVERS[0]['short_id']
+VPN_REALITY_SNI = SERVERS[0]['sni']
