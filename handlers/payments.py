@@ -53,10 +53,14 @@ async def successful_payment(message: types.Message):
         # Создаем клиента в панели
         xui = XUIClient(XUI_HOST, XUI_USERNAME, XUI_PASSWORD)
         
+        # Название сервера
+        server_name = "Frankfurt"
+        
         if MOCK_MODE:
             # Тестовый режим
             client_id = f"mock_{user_id}_{datetime.datetime.now().timestamp()}"
-            config_link = f"vless://mock@{VPN_SERVER_IP}:443?type=tcp&security=reality#Mock_{plan.name}"
+            plan_display_name = f"MILF VPN - {server_name} ({plan.name})"
+            config_link = f"vless://mock@{VPN_SERVER_IP}:443?type=tcp&security=reality#{plan_display_name.replace(' ', '_')}"
         else:
             client_id = await xui.add_client(plan.duration_days, email=f"tg_{user_id}")
             if not client_id:
@@ -64,11 +68,12 @@ async def successful_payment(message: types.Message):
                 await xui.close()
                 return
             
-            # Генерируем ссылку для подключения
+            # Генерируем ссылку с красивым названием
+            plan_display_name = f"MILF VPN - {server_name} ({plan.name})"
             config_link = await xui.get_client_config(
                 client_uuid=client_id,
                 server_host=VPN_SERVER_IP,
-                plan_name=plan.name
+                plan_name=plan_display_name
             )
         
         # Сохраняем подписку в БД
@@ -111,12 +116,13 @@ async def successful_payment(message: types.Message):
         await message.answer(
             f"✅ *Подписка {plan.name} активирована!*\n\n"
             f"📅 Действует до: {end_date.strftime('%d.%m.%Y')}\n\n"
-            f"🔗 Нажмите на кнопку, чтобы импортировать конфигурацию в приложение V2RayNG или Streisand:\n\n"
+            f"🔗 *Ваша конфигурация:*\n"
+            f"`{config_link}`\n\n"
             f"📱 *Инструкция:*\n"
-            f"1. Скачайте V2RayNG (Android) или Streisand (iOS)\n"
-            f"2. Нажмите + → Import from clipboard\n"
-            f"3. Вставьте ссылку\n"
-            f"4. Нажмите ▶️ для подключения",
+            f"1️⃣ Скачайте V2RayNG (Android) или Streisand (iOS)\n"
+            f"2️⃣ Нажмите + → Import from clipboard\n"
+            f"3️⃣ Вставьте ссылку\n"
+            f"4️⃣ Нажмите ▶️ для подключения",
             reply_markup=keyboard,
             parse_mode="Markdown"
         )
@@ -142,18 +148,58 @@ async def copy_link_callback(callback: types.CallbackQuery):
             sub, plan = sub_plan
             from config import VPN_SERVER_IP
             
-            xui = XUIClient(None, None, None)  # Не нужно для генерации ссылки
-            config_link = await xui.get_client_config(
-                client_uuid=client_id,
-                server_host=VPN_SERVER_IP,
-                plan_name=plan.name
+            server_name = "Frankfurt"
+            plan_display_name = f"MILF VPN - {server_name} ({plan.name})"
+            
+            # Генерируем ссылку
+            config_link = (
+                f"vless://{sub.client_id}@{VPN_SERVER_IP}:443"
+                f"?type=tcp&security=reality"
+                f"&pbk={VPN_REALITY_PUBLIC_KEY}&fp=chrome"
+                f"&sni=www.cloudflare.com&sid={VPN_REALITY_SHORT_ID}"
+                f"#{plan_display_name.replace(' ', '_')}"
             )
             
             await callback.answer()
             await callback.message.answer(
-                f"🔗 *Ваша ссылка:*\n`{config_link}`\n\n"
-                f"Скопируйте её и вставьте в приложение V2RayNG.",
+                f"🔗 *Ваша ссылка ({plan_display_name}):*\n\n"
+                f"`{config_link}`\n\n"
+                f"📅 *Действует до:* {sub.end_date.strftime('%d.%m.%Y')}\n\n"
+                f"Скопируйте её и вставьте в приложение V2RayNG / Streisand.",
                 parse_mode="Markdown"
             )
         else:
-            await callback.answer("Подписка не найдена", show_alert=True)
+            # Если не нашли в платных, ищем в пробных
+            from database.models import Subscription
+            sub = await session.execute(
+                select(Subscription).where(
+                    Subscription.client_id == client_id,
+                    Subscription.is_active == True
+                )
+            )
+            sub = sub.scalar_one_or_none()
+            
+            if sub:
+                from config import VPN_SERVER_IP, VPN_REALITY_PUBLIC_KEY, VPN_REALITY_SHORT_ID
+                
+                server_name = "Frankfurt"
+                plan_display_name = "MILF VPN - Frankfurt (Trial)"
+                
+                config_link = (
+                    f"vless://{sub.client_id}@{VPN_SERVER_IP}:443"
+                    f"?type=tcp&security=reality"
+                    f"&pbk={VPN_REALITY_PUBLIC_KEY}&fp=chrome"
+                    f"&sni=www.cloudflare.com&sid={VPN_REALITY_SHORT_ID}"
+                    f"#{plan_display_name.replace(' ', '_')}"
+                )
+                
+                await callback.answer()
+                await callback.message.answer(
+                    f"🔗 *Ваша ссылка ({plan_display_name}):*\n\n"
+                    f"`{config_link}`\n\n"
+                    f"📅 *Действует до:* {sub.end_date.strftime('%d.%m.%Y')}\n\n"
+                    f"Скопируйте её и вставьте в приложение V2RayNG / Streisand.",
+                    parse_mode="Markdown"
+                )
+            else:
+                await callback.answer("❌ Подписка не найдена", show_alert=True)
