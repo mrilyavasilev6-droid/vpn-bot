@@ -5,7 +5,7 @@ from sqlalchemy import select
 from database.session import AsyncSessionLocal
 from database.crud import get_plan
 from database.models import Trial, Subscription
-from config import VPN_SERVER_IP, VPN_REALITY_PUBLIC_KEY, VPN_REALITY_SHORT_ID, XUI_HOST
+from config import VPN_SERVER_IP, VPN_REALITY_PUBLIC_KEY, VPN_REALITY_SHORT_ID, XUI_HOST, XUI_USERNAME, XUI_PASSWORD
 from vpn.xui import XUIClient
 import logging
 
@@ -214,10 +214,9 @@ async def get_vpn_key(callback: types.CallbackQuery):
         end_time_str = end_date.strftime('%H:%M')
         
         # Получаем суммарный использованный трафик по всем серверам
-        xui = XUIClient(None, None, None)
+        xui = XUIClient(XUI_HOST, XUI_USERNAME, XUI_PASSWORD)
         total_usage = 0
         try:
-            # Пытаемся получить статистику из панели
             client_stats = await xui.get_client_all_inbounds(subscription.client_id)
             if client_stats:
                 total_usage = client_stats.get('total', 0) / (1024**3)
