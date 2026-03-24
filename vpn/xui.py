@@ -20,6 +20,7 @@ class XUIClient:
         self._session = None
         self._cookies = None
         self._inbound_id = 1  # ID инбаунда
+        logger.info(f"XUIClient initialized with api_url: {self.api_url}")
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None:
@@ -31,13 +32,18 @@ class XUIClient:
         session = await self._get_session()
         
         data = {"username": self.username, "password": self.password}
+        url = f"{self.api_url}/login"
         
-        async with session.post(f"{self.api_url}/login", data=data) as resp:
+        logger.info(f"Login attempt to: {url}")
+        
+        async with session.post(url, data=data) as resp:
             if resp.status == 200:
                 self._cookies = resp.cookies
                 logger.info("✅ Logged in to 3x-ui")
                 return True
             logger.error(f"❌ Login failed: {resp.status}")
+            text = await resp.text()
+            logger.error(f"Response: {text}")
             return False
 
     async def _request(self, method: str, endpoint: str, data: Dict = None) -> Optional[Dict]:
@@ -48,37 +54,51 @@ class XUIClient:
         if self._cookies:
             headers["Cookie"] = self._cookies.output(header='')
         
-        async with session.request(method, f"{self.api_url}{endpoint}", json=data, headers=headers) as resp:
+        url = f"{self.api_url}{endpoint}"
+        logger.info(f"📡 Request: {method} {url}")
+        if data:
+            logger.debug(f"Request data: {json.dumps(data, ensure_ascii=False)[:500]}")
+        
+        async with session.request(method, url, json=data, headers=headers) as resp:
+            logger.info(f"Response status: {resp.status}")
+            
             if resp.status == 401:
+                logger.warning("Session expired, re-logging...")
                 await self._login()
                 if self._cookies:
                     headers["Cookie"] = self._cookies.output(header='')
-                async with session.request(method, f"{self.api_url}{endpoint}", json=data, headers=headers) as resp2:
+                async with session.request(method, url, json=data, headers=headers) as resp2:
                     if resp2.status == 200:
                         return await resp2.json()
                     return None
             elif resp.status == 200:
                 return await resp.json()
             else:
-                logger.error(f"Request failed: {resp.status}")
+                text = await resp.text()
+                logger.error(f"❌ Request failed: {resp.status}, response: {text}")
                 return None
 
     async def get_client_by_email(self, email: str) -> Optional[Dict]:
         """Получить клиента по email"""
+        logger.info(f"Looking for client by email: {email}")
         result = await self._request('GET', f'/panel/api/inbounds/getClientTraffic?email={email}')
         if result and result.get('success') and result.get('obj'):
+            logger.info(f"Found client: {result['obj'].get('id')}")
             return result['obj']
+        logger.info(f"Client with email {email} not found")
         return None
 
     async def add_client(self, days: int = 30, email: str = None) -> Optional[str]:
         """Создать нового клиента на сервере или вернуть существующего"""
+        logger.info(f"📝 add_client called: days={days}, email={email}")
         
         # Если email указан, проверяем, есть ли уже такой клиент
         if email:
             existing_client = await self.get_client_by_email(email)
             if existing_client:
-                logger.info(f"✅ Client already exists: {email}, UUID: {existing_client.get('id')}")
-                return existing_client.get('id')
+                client_uuid = existing_client.get('id')
+                logger.info(f"✅ Client already exists: {email}, UUID: {client_uuid}")
+                return client_uuid
         
         # Создаём нового клиента
         client_uuid = str(uuid.uuid4())
@@ -103,6 +123,7 @@ class XUIClient:
         }
         
         logger.info(f"Sending add_client request for email: {email}")
+        logger.debug(f"Payload: {json.dumps(payload, ensure_ascii=False)}")
         
         result = await self._request('POST', '/panel/api/inbounds/addClient', payload)
         
@@ -164,14 +185,18 @@ class XUIClient:
         
         name = urllib.parse.quote(plan_name)
         
-        return (
+        config = (
             f"vless://{client_uuid}@{server_host}:443"
             f"?type=tcp&security=reality"
             f"&pbk={pbk}&fp=chrome"
             f"&sni={sni_value}&sid={sid}"
             f"#{name}"
         )
+        
+        logger.info(f"Generated config for {client_uuid}")
+        return config
 
     async def close(self):
         if self._session:
             await self._session.close()
+            logger.info("Session closed")
