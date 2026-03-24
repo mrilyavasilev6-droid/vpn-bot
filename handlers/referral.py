@@ -28,5 +28,9 @@ async def referral_info(callback: types.CallbackQuery):
             [types.InlineKeyboardButton(text="Поделиться", url=f"https://t.me/share/url?url={ref_link}&text=Привет! Подключай быстрый VPN по моей ссылке:")],
             [types.InlineKeyboardButton(text="◀ Назад", callback_data="main_menu")]
         ])
-        await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+      try:
+    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+except:
+    # Если не удалось отредактировать (например, сообщение с фото), отправляем новое
+    await callback.message.answer(text, reply_markup=keyboard, parse_mode="HTML")
     await callback.answer()
