@@ -29,7 +29,7 @@ async def show_subscription_plans(callback: types.CallbackQuery):
             ])
         keyboard.append([InlineKeyboardButton(text="◀ Назад", callback_data="main_menu")])
         
-        await callback.message.edit_text(
+        await callback.message.answer(
             "💎 *Выберите тариф:*\n\n"
             "Оплата производится звёздами Telegram.\n"
             "После оплаты вы получите ссылку для подключения.",
