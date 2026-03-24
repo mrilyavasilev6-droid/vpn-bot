@@ -48,6 +48,10 @@ class XUIClient:
 
     async def _request(self, method: str, endpoint: str, data: Dict = None) -> Optional[Dict]:
         """Выполнить запрос к API"""
+        # Принудительно авторизуемся перед каждым запросом
+        if not self._cookies:
+            await self._login()
+        
         session = await self._get_session()
         
         headers = {}
