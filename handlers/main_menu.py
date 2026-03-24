@@ -55,12 +55,19 @@ async def back_to_main(callback: types.CallbackQuery):
 
 @router.callback_query(lambda c: c.data == "support")
 async def support(callback: types.CallbackQuery):
-    await callback.message.answer(
+    """Поддержка"""
+    text = (
         "📞 *Поддержка MILF VPN*\n\n"
         "По всем вопросам обращайтесь:\n"
-        "✉️ @support_username\n"
-        "📧 support@milfvpn.com\n\n"
-        "Ответим в течение 24 часов. Всегда на связи.",
-        parse_mode="Markdown"
+        "✉️ Напишите сообщение в этот чат\n\n"
+        "Я передам его администратору.\n"
+        "Ответ придёт в ближайшее время."
     )
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✏️ Написать сообщение", callback_data="feedback_start")],
+        [InlineKeyboardButton(text="◀ Назад", callback_data="main_menu")]
+    ])
+    
+    await callback.message.answer(text, reply_markup=keyboard, parse_mode="Markdown")
     await callback.answer()
