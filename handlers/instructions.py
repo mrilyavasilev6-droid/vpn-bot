@@ -1,15 +1,67 @@
 from aiogram import Router, types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from datetime import datetime
+from datetime import datetime, timedelta
 from sqlalchemy import select
 from database.session import AsyncSessionLocal
-from database.crud import get_user_active_subscription, get_plan
+from database.crud import get_plan
 from database.models import Trial, Subscription
 from config import VPN_SERVER_IP, VPN_REALITY_PUBLIC_KEY, VPN_REALITY_SHORT_ID
 import logging
 
 router = Router()
 logger = logging.getLogger(__name__)
+
+
+async def get_active_subscription(session, user_id: int):
+    """Получить активную подписку (платную или пробную)"""
+    now = datetime.now()
+    
+    # 1. Ищем в Subscription
+    sub = await session.execute(
+        select(Subscription).where(
+            Subscription.user_id == user_id,
+            Subscription.is_active == True,
+            Subscription.end_date > now
+        )
+    )
+    subscription = sub.scalar_one_or_none()
+    
+    if subscription:
+        logger.info(f"Found subscription for user {user_id}, expires at {subscription.end_date}")
+        return subscription
+    
+    # 2. Если нет, ищем в Trial
+    trial = await session.execute(
+        select(Trial).where(
+            Trial.user_id == user_id,
+            Trial.is_active == True,
+            Trial.end_date > now
+        )
+    )
+    trial = trial.scalar_one_or_none()
+    
+    if trial:
+        logger.info(f"Found trial for user {user_id}, expires at {trial.end_date}")
+        
+        # Создаём подписку из Trial (если нет связанной)
+        # Генерируем client_id на основе trial.id
+        client_id = f"trial_{user_id}_{trial.id}"
+        
+        new_sub = Subscription(
+            user_id=user_id,
+            plan_id=None,
+            client_id=client_id,
+            server_id=1,
+            start_date=trial.start_date,
+            end_date=trial.end_date,
+            is_active=True
+        )
+        session.add(new_sub)
+        await session.commit()
+        logger.info(f"Created subscription from trial for user {user_id}, client_id={client_id}")
+        return new_sub
+    
+    return None
 
 
 @router.callback_query(lambda c: c.data == "instructions")
@@ -66,7 +118,6 @@ async def show_platform_instruction(callback: types.CallbackQuery):
     platform = callback.data.split("_")[1]
     
     if platform == "ios":
-        app_name = "Streisand"
         app_link = "https://apps.apple.com/app/streisand/id6450534064"
         instructions = (
             "📱 *Установка на iPhone / iPad*\n\n"
@@ -80,7 +131,6 @@ async def show_platform_instruction(callback: types.CallbackQuery):
         )
     
     elif platform == "android":
-        app_name = "V2RayNG"
         app_link = "https://play.google.com/store/apps/details?id=com.v2ray.ang"
         instructions = (
             "🤖 *Установка на Android*\n\n"
@@ -94,7 +144,6 @@ async def show_platform_instruction(callback: types.CallbackQuery):
         )
     
     elif platform == "mac":
-        app_name = "V2RayU"
         app_link = "https://github.com/yanue/V2rayU/releases"
         instructions = (
             "🍎 *Установка на Mac*\n\n"
@@ -109,7 +158,6 @@ async def show_platform_instruction(callback: types.CallbackQuery):
         )
     
     else:  # windows
-        app_name = "v2rayN"
         app_link = "https://github.com/2dust/v2rayN/releases"
         instructions = (
             "🪟 *Установка на Windows*\n\n"
@@ -144,40 +192,7 @@ async def get_vpn_key(callback: types.CallbackQuery):
     user_id = callback.from_user.id
     
     async with AsyncSessionLocal() as session:
-        # 1. Проверяем активную платную подписку
-        subscription = await get_user_active_subscription(session, user_id)
-        
-        # 2. Если нет платной, проверяем пробную подписку
-        if not subscription:
-            logger.info(f"No active subscription for user {user_id}, checking trial...")
-            
-            # Находим активную триальную подписку
-            trial = await session.execute(
-                select(Trial).where(
-                    Trial.user_id == user_id,
-                    Trial.is_active == True,
-                    Trial.end_date > datetime.now()
-                )
-            )
-            trial = trial.scalar_one_or_none()
-            
-            if trial:
-                logger.info(f"Found active trial for user {user_id}, ends at {trial.end_date}")
-                
-                # Находим связанную подписку по client_id
-                # Для пробного периода client_id = f"trial_{user_id}" или другой формат
-                # Нужно искать в Subscription с этим user_id
-                subscription = await session.execute(
-                    select(Subscription).where(
-                        Subscription.user_id == user_id,
-                        Subscription.is_active == True,
-                        Subscription.end_date > datetime.now()
-                    )
-                )
-                subscription = subscription.scalar_one_or_none()
-                
-                if subscription:
-                    logger.info(f"Found trial subscription for user {user_id}")
+        subscription = await get_active_subscription(session, user_id)
         
         if not subscription:
             logger.warning(f"No active subscription or trial for user {user_id}")
@@ -189,10 +204,11 @@ async def get_vpn_key(callback: types.CallbackQuery):
             return
         
         # Определяем название подписки
-        plan_name = "Пробный период"
         if subscription.plan_id:
             plan = await get_plan(session, subscription.plan_id)
-            plan_name = plan.name if plan else "VPN"
+            plan_name = plan.name if plan else "Подписка"
+        else:
+            plan_name = "🔓 Пробный период"
         
         # Генерируем vless ссылку
         config_link = (
@@ -203,7 +219,6 @@ async def get_vpn_key(callback: types.CallbackQuery):
             f"#{plan_name.replace(' ', '_')}"
         )
         
-        # Кнопка копирования
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📋 Скопировать ссылку", callback_data=f"copy_link_{subscription.client_id}")],
             [InlineKeyboardButton(text="◀ Назад", callback_data="instructions")]
@@ -232,12 +247,8 @@ async def copy_link_callback(callback: types.CallbackQuery):
     client_id = callback.data.split("_")[2]
     
     async with AsyncSessionLocal() as session:
-        # Ищем подписку по client_id
         subscription = await session.execute(
-            select(Subscription).where(
-                Subscription.client_id == client_id,
-                Subscription.is_active == True
-            )
+            select(Subscription).where(Subscription.client_id == client_id)
         )
         subscription = subscription.scalar_one_or_none()
         
@@ -245,13 +256,8 @@ async def copy_link_callback(callback: types.CallbackQuery):
             await callback.answer("Подписка не найдена", show_alert=True)
             return
         
-        # Определяем название подписки
-        plan_name = "Пробный период"
-        if subscription.plan_id:
-            plan = await get_plan(session, subscription.plan_id)
-            plan_name = plan.name if plan else "VPN"
+        plan_name = "Пробный период" if not subscription.plan_id else "VPN"
         
-        # Генерируем ссылку
         config_link = (
             f"vless://{subscription.client_id}@{VPN_SERVER_IP}:443"
             f"?type=tcp&security=reality"
