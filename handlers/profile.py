@@ -2,7 +2,7 @@ from aiogram import Router, types
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database.session import AsyncSessionLocal
-from database.crud import get_user, get_user_active_subscription
+from database.crud import get_user, get_user_active_subscription, get_plan
 from vpn.xui import XUIClient
 from config import MOCK_MODE, XUI_HOST, XUI_USERNAME, XUI_PASSWORD
 
@@ -22,48 +22,78 @@ async def show_profile(callback: types.CallbackQuery):
         # Получаем активную подписку
         subscription = await get_user_active_subscription(session, callback.from_user.id)
         
-        if subscription and not MOCK_MODE:
-            # Получаем реальный статус из панели
-            xui = XUIClient(XUI_HOST, XUI_USERNAME, XUI_PASSWORD)
-            status = await xui.get_client(subscription.client_id)
-            await xui.close()
+        if subscription:
+            end_date_str = subscription.end_date.strftime('%d.%m.%Y')
             
-            if status:
-                usage_up = status.get('up', 0) / (1024**3)  # GB
-                usage_down = status.get('down', 0) / (1024**3)
-                total_usage = usage_up + usage_down
+            # Получаем название плана (если есть)
+            plan_name = "Пробный период"
+            if subscription.plan_id:
+                plan = await get_plan(session, subscription.plan_id)
+                plan_name = plan.name if plan else "Подписка"
+            
+            if not MOCK_MODE:
+                # Получаем реальный статус из панели
+                xui = XUIClient(XUI_HOST, XUI_USERNAME, XUI_PASSWORD)
+                status = await xui.get_client(subscription.client_id)
+                await xui.close()
                 
+                if status:
+                    usage_up = status.get('up', 0) / (1024**3)
+                    usage_down = status.get('down', 0) / (1024**3)
+                    total_usage = usage_up + usage_down
+                    
+                    profile_text = (
+                        f"👤 *Профиль MILF VPN*\n\n"
+                        f"🆔 ID: `{user.user_id}`\n"
+                        f"📛 Username: @{user.username or 'нет'}\n"
+                        f"💰 Баланс: {user.balance} ₽\n"
+                        f"👥 Рефералов: {await get_referral_count(session, user.user_id)}\n\n"
+                        f"📱 *Активная подписка:*\n"
+                        f"📦 Тип: {plan_name}\n"
+                        f"📅 Действует до: {end_date_str}\n"
+                        f"📈 Использовано: {total_usage:.2f} GB\n"
+                        f"⬆️ Исходящий: {usage_up:.2f} GB\n"
+                        f"⬇️ Входящий: {usage_down:.2f} GB"
+                    )
+                else:
+                    profile_text = (
+                        f"👤 *Профиль MILF VPN*\n\n"
+                        f"🆔 ID: `{user.user_id}`\n"
+                        f"📛 Username: @{user.username or 'нет'}\n"
+                        f"💰 Баланс: {user.balance} ₽\n"
+                        f"👥 Рефералов: {await get_referral_count(session, user.user_id)}\n\n"
+                        f"✅ *Активная подписка:* {plan_name}\n"
+                        f"📅 Действует до: {end_date_str}"
+                    )
+            else:
                 profile_text = (
-                    f"👤 *Профиль*\n\n"
-                    f"🆔 ID: {user.user_id}\n"
+                    f"👤 *Профиль MILF VPN*\n\n"
+                    f"🆔 ID: `{user.user_id}`\n"
                     f"📛 Username: @{user.username or 'нет'}\n"
                     f"💰 Баланс: {user.balance} ₽\n"
                     f"👥 Рефералов: {await get_referral_count(session, user.user_id)}\n\n"
-                    f"📱 *Подписка:*\n"
-                    f"📅 Действует до: {subscription.end_date.strftime('%d.%m.%Y')}\n"
-                    f"📈 Использовано: {total_usage:.2f} GB\n"
-                    f"⬆️ Исходящий: {usage_up:.2f} GB\n"
-                    f"⬇️ Входящий: {usage_down:.2f} GB"
+                    f"✅ *Активная подписка:* {plan_name}\n"
+                    f"📅 Действует до: {end_date_str}"
                 )
-            else:
-                profile_text = f"👤 *Профиль*\n\n🆔 ID: {user.user_id}\n💰 Баланс: {user.balance} ₽\n\n❌ Не удалось получить статус подписки"
         else:
             profile_text = (
-                f"👤 *Профиль*\n\n"
-                f"🆔 ID: {user.user_id}\n"
+                f"👤 *Профиль MILF VPN*\n\n"
+                f"🆔 ID: `{user.user_id}`\n"
                 f"📛 Username: @{user.username or 'нет'}\n"
                 f"💰 Баланс: {user.balance} ₽\n"
                 f"👥 Рефералов: {await get_referral_count(session, user.user_id)}\n\n"
-                f"📱 *Подписка:* {'Активна' if subscription else 'Нет активной подписки'}"
+                f"📱 *Подписка:* Нет активной подписки\n\n"
+                f"🔓 Попробуйте пробный период — 3 дня бесплатно!\n"
+                f"💎 Или выберите тариф в разделе «Выбрать тариф»"
             )
         
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="💳 Пополнить баланс", callback_data="deposit")],
-            [InlineKeyboardButton(text="📊 История транзакций", callback_data="history")],
+            [InlineKeyboardButton(text="💎 Выбрать тариф", callback_data="subscription")],
+            [InlineKeyboardButton(text="🔓 Пробный период", callback_data="trial_start")],
             [InlineKeyboardButton(text="◀ Назад", callback_data="main_menu")]
         ])
         
-        await callback.message.answer(
+        await callback.message.edit_text(
             profile_text,
             reply_markup=keyboard,
             parse_mode="Markdown"
