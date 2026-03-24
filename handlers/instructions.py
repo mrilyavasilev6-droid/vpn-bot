@@ -5,7 +5,7 @@ from sqlalchemy import select
 from database.session import AsyncSessionLocal
 from database.crud import get_plan
 from database.models import Trial, Subscription
-from config import VPN_SERVER_IP, SERVERS, XUI_HOST, XUI_USERNAME, XUI_PASSWORD
+from config import VPN_SERVER_IP, VPN_REALITY_PUBLIC_KEY, VPN_REALITY_SHORT_ID, XUI_HOST
 from vpn.xui import XUIClient
 import logging
 
@@ -54,16 +54,19 @@ async def instructions_start(callback: types.CallbackQuery):
     text = (
         "📖 *Инструкция по установке MILF VPN*\n\n"
         "1️⃣ В Главном меню выберите **Пробный период** или оформите **Подписку**\n\n"
-        "2️⃣ После активации выберите вашу платформу:\n"
+        "2️⃣ После активации вы получите ссылку-подписку\n\n"
+        "3️⃣ Скачайте приложение для вашей платформы:\n"
         "   • iPhone / iPad — Streisand\n"
         "   • Android — V2RayNG\n"
         "   • Mac — V2RayU\n"
         "   • Windows — v2rayN\n\n"
-        "3️⃣ Скачайте и установите приложение\n\n"
-        "4️⃣ Нажмите **Получить ключ** — вы получите ссылки на все серверы\n\n"
-        "5️⃣ Нажмите на каждую ссылку — приложение откроется и импортирует конфигурацию\n\n"
-        "6️⃣ Нажмите ▶️ в приложении для подключения\n\n"
-        "✅ Готово! Интернет защищён."
+        "4️⃣ В приложении нажмите + → Add Subscription\n\n"
+        "5️⃣ Вставьте полученную ссылку\n\n"
+        "6️⃣ Нажмите обновить — появятся все серверы\n\n"
+        "7️⃣ Нажмите ▶️ на любом сервере для подключения\n\n"
+        "✅ Готово! Интернет защищён.\n\n"
+        "✨ *Доступные серверы:*\n"
+        "🇩🇪 Германия | 🇮🇳 Индия | 🇷🇺 Россия СПБ | 🇮🇹 Италия | 🇹🇷 Турция"
     )
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -109,8 +112,10 @@ async def show_platform_instruction(callback: types.CallbackQuery):
             f"[Открыть App Store]({app_link})\n\n"
             "2️⃣ Установите приложение\n\n"
             "3️⃣ Вернитесь в бота и нажмите **Получить ключ**\n\n"
-            "4️⃣ Откройте полученные ссылки — Streisand автоматически импортирует конфигурации\n\n"
-            "5️⃣ Нажмите ▶️ для подключения\n\n"
+            "4️⃣ В Streisand нажмите + → Add Subscription\n"
+            "5️⃣ Вставьте ссылку\n"
+            "6️⃣ Нажмите обновить\n"
+            "7️⃣ Нажмите ▶️ для подключения\n\n"
             "✅ Готово!"
         )
     
@@ -122,8 +127,10 @@ async def show_platform_instruction(callback: types.CallbackQuery):
             f"[Открыть Google Play]({app_link})\n\n"
             "2️⃣ Установите приложение\n\n"
             "3️⃣ Вернитесь в бота и нажмите **Получить ключ**\n\n"
-            "4️⃣ Нажмите на полученные ссылки — V2RayNG откроется и импортирует конфигурации\n\n"
-            "5️⃣ Нажмите ▶️ для подключения\n\n"
+            "4️⃣ В V2RayNG нажмите + → Add Subscription\n"
+            "5️⃣ Вставьте ссылку\n"
+            "6️⃣ Нажмите обновить\n"
+            "7️⃣ Нажмите ▶️ для подключения\n\n"
             "✅ Готово!"
         )
     
@@ -135,9 +142,10 @@ async def show_platform_instruction(callback: types.CallbackQuery):
             f"[Скачать V2RayU]({app_link})\n\n"
             "2️⃣ Установите приложение (перетащите в папку Applications)\n\n"
             "3️⃣ Вернитесь в бота и нажмите **Получить ключ**\n\n"
-            "4️⃣ Скопируйте полученные ссылки\n\n"
-            "5️⃣ Откройте V2RayU → нажмите на иконку в строке меню → Import → Import from clipboard (для каждой ссылки)\n\n"
-            "6️⃣ Нажмите Turn On\n\n"
+            "4️⃣ Скопируйте ссылку-подписку\n\n"
+            "5️⃣ Откройте V2RayU → нажмите на иконку в строке меню → Subscription → Add\n"
+            "6️⃣ Вставьте ссылку\n"
+            "7️⃣ Нажмите Turn On\n\n"
             "✅ Готово!"
         )
     
@@ -149,9 +157,10 @@ async def show_platform_instruction(callback: types.CallbackQuery):
             f"[Скачать v2rayN]({app_link})\n\n"
             "2️⃣ Распакуйте архив и запустите v2rayN.exe\n\n"
             "3️⃣ Вернитесь в бота и нажмите **Получить ключ**\n\n"
-            "4️⃣ Скопируйте полученные ссылки\n\n"
-            "5️⃣ В v2rayN нажмите → Servers → Import from clipboard (для каждой ссылки)\n\n"
-            "6️⃣ Нажмите Enter (кнопка включения)\n\n"
+            "4️⃣ Скопируйте ссылку-подписку\n\n"
+            "5️⃣ В v2rayN нажмите → Subscription → Add\n"
+            "6️⃣ Вставьте ссылку\n"
+            "7️⃣ Нажмите Enter (кнопка включения)\n\n"
             "✅ Готово!"
         )
     
@@ -172,7 +181,7 @@ async def show_platform_instruction(callback: types.CallbackQuery):
 
 @router.callback_query(lambda c: c.data == "get_key")
 async def get_vpn_key(callback: types.CallbackQuery):
-    """Получить VPN ключи для активной подписки (все серверы)"""
+    """Получить ссылку-подписку для активной подписки"""
     user_id = callback.from_user.id
     
     async with AsyncSessionLocal() as session:
@@ -187,129 +196,87 @@ async def get_vpn_key(callback: types.CallbackQuery):
             )
             return
         
-        # Определяем название подписки
+        # Генерируем ссылку-подписку
+        sub_link = f"{XUI_HOST}/sub/{subscription.client_id}"
+        
+        # Определяем название подписки с сервером
+        server_name = "Frankfurt"
+        
         if subscription.plan_id:
             plan = await get_plan(session, subscription.plan_id)
-            plan_name = f"MILF VPN - {plan.name}"
+            plan_name = f"MILF VPN - {server_name} ({plan.name})"
         else:
-            plan_name = "MILF VPN - Trial"
+            plan_name = f"MILF VPN - {server_name} (Trial)"
         
-        # Генерируем ссылки для всех серверов
-        xui = XUIClient(XUI_HOST, XUI_USERNAME, XUI_PASSWORD)
-        all_configs = await xui.get_all_server_configs(subscription.client_id, plan_name)
-        await xui.close()
-        
-        # Формируем список серверов с флагами
-        servers_text = "\n".join([f"• {s['name']}" for s in SERVERS])
-        
-        # Клавиатура с кнопкой добавить все серверы
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🌍 Добавить все серверы", callback_data=f"add_all_{subscription.client_id}")],
-            [InlineKeyboardButton(text="◀ Назад", callback_data="instructions")]
-        ])
-        
+        # Форматируем дату и время
         end_date = subscription.end_date
         end_date_str = end_date.strftime('%d.%m.%Y')
         end_time_str = end_date.strftime('%H:%M')
         
+        # Получаем суммарный использованный трафик по всем серверам
+        xui = XUIClient(None, None, None)
+        total_usage = 0
+        try:
+            # Пытаемся получить статистику из панели
+            client_stats = await xui.get_client_all_inbounds(subscription.client_id)
+            if client_stats:
+                total_usage = client_stats.get('total', 0) / (1024**3)
+        except Exception as e:
+            logger.error(f"Error getting client stats: {e}")
+        await xui.close()
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📋 Скопировать ссылку", callback_data=f"copy_sub_{subscription.client_id}")],
+            [InlineKeyboardButton(text="📱 Добавить в V2RayNG", url=sub_link)],
+            [InlineKeyboardButton(text="◀ Назад", callback_data="instructions")]
+        ])
+        
         await callback.message.answer(
-            f"🔑 *Ваши ключи подключения ({plan_name}):*\n\n"
-            f"🌍 *Доступные серверы:*\n{servers_text}\n\n"
+            f"🔑 *{plan_name}*\n\n"
+            f"🔗 *Ссылка-подписка:*\n`{sub_link}`\n\n"
+            f"📊 *Использовано:* {total_usage:.2f} GB\n"
             f"📅 *Действует до:* {end_date_str} в {end_time_str} МСК\n\n"
-            f"🔗 Нажмите кнопку ниже, чтобы добавить ВСЕ серверы в приложение:\n\n"
-            f"📱 *Как подключиться:*\n"
-            f"1️⃣ Нажмите кнопку «Добавить все серверы»\n"
-            f"2️⃣ Появятся 5 ссылок — нажмите на каждую\n"
-            f"3️⃣ Приложение откроется автоматически\n"
-            f"4️⃣ Нажмите ▶️ для подключения",
+            f"📱 *Как добавить в V2RayNG:*\n"
+            f"1️⃣ Нажмите + → Add Subscription\n"
+            f"2️⃣ Вставьте ссылку\n"
+            f"3️⃣ Нажмите обновить\n\n"
+            f"✨ *Доступные серверы:*\n"
+            f"🇩🇪 Германия | 🇮🇳 Индия | 🇷🇺 Россия СПБ | 🇮🇹 Италия | 🇹🇷 Турция",
             reply_markup=keyboard,
             parse_mode="Markdown"
         )
         
-        logger.info(f"Keys sent to user {user_id}, expires at {subscription.end_date}")
+        logger.info(f"Subscription link sent to user {user_id}, expires at {subscription.end_date}")
         await callback.answer()
 
 
-@router.callback_query(lambda c: c.data.startswith("add_all_"))
-async def add_all_servers(callback: types.CallbackQuery):
-    """Отправить все конфигурации для импорта"""
+@router.callback_query(lambda c: c.data.startswith("copy_sub_"))
+async def copy_sub_link(callback: types.CallbackQuery):
+    """Скопировать ссылку-подписку"""
     client_id = callback.data.split("_")[2]
+    sub_link = f"{XUI_HOST}/sub/{client_id}"
     
-    async with AsyncSessionLocal() as session:
-        # Ищем подписку по client_id
-        subscription = await session.execute(
-            select(Subscription).where(Subscription.client_id == client_id)
-        )
-        subscription = subscription.scalar_one_or_none()
-        
-        if not subscription:
-            await callback.answer("❌ Подписка не найдена", show_alert=True)
-            return
-        
-        # Определяем название подписки
-        if subscription.plan_id:
-            plan = await get_plan(session, subscription.plan_id)
-            plan_name = f"MILF VPN - {plan.name}"
-        else:
-            plan_name = "MILF VPN - Trial"
-        
-        # Генерируем ссылки для всех серверов
-        xui = XUIClient(XUI_HOST, XUI_USERNAME, XUI_PASSWORD)
-        all_configs = await xui.get_all_server_configs(subscription.client_id, plan_name)
-        await xui.close()
-        
-        # Отправляем все ссылки по одной
-        for config in all_configs:
-            # Извлекаем название сервера из ссылки
-            server_name = config.split('#')[-1].replace('_', ' ')
-            await callback.message.answer(
-                f"🔗 *{server_name}*\n\n"
-                f"`{config}`\n\n"
-                f"📱 Нажмите на ссылку или скопируйте её и вставьте в приложение.",
-                parse_mode="Markdown"
-            )
-        
-        await callback.answer("✅ Все серверы добавлены!")
-        await callback.message.answer(
-            "🎉 *Готово!*\n\n"
-            "Теперь в приложении V2RayNG / Streisand у вас есть 5 серверов:\n"
-            + "\n".join([f"• {s['name']}" for s in SERVERS]) +
-            "\n\nВыберите любой и нажмите ▶️ для подключения.\n\n"
-            "📌 *Совет:* Выбирайте сервер с наименьшим пингом для лучшей скорости.",
-            parse_mode="Markdown"
-        )
+    await callback.answer()
+    await callback.message.answer(
+        f"🔗 *Ваша ссылка-подписка:*\n`{sub_link}`\n\n"
+        f"Скопируйте её и вставьте в V2RayNG → Add Subscription.\n\n"
+        f"✨ После добавления у вас появятся все серверы:\n"
+        f"🇩🇪 Германия | 🇮🇳 Индия | 🇷🇺 Россия СПБ | 🇮🇹 Италия | 🇹🇷 Турция",
+        parse_mode="Markdown"
+    )
 
 
 @router.callback_query(lambda c: c.data.startswith("copy_link_"))
 async def copy_link_callback(callback: types.CallbackQuery):
-    """Обработка кнопки копирования ссылки (для обратной совместимости)"""
+    """Обработка кнопки копирования ссылки (старый формат, для совместимости)"""
     client_id = callback.data.split("_")[2]
+    sub_link = f"{XUI_HOST}/sub/{client_id}"
     
-    async with AsyncSessionLocal() as session:
-        subscription = await session.execute(
-            select(Subscription).where(Subscription.client_id == client_id)
-        )
-        subscription = subscription.scalar_one_or_none()
-        
-        if not subscription:
-            await callback.answer("❌ Подписка не найдена", show_alert=True)
-            return
-        
-        if subscription.plan_id:
-            plan = await get_plan(session, subscription.plan_id)
-            plan_name = f"MILF VPN - {plan.name}"
-        else:
-            plan_name = "MILF VPN - Trial"
-        
-        xui = XUIClient(XUI_HOST, XUI_USERNAME, XUI_PASSWORD)
-        all_configs = await xui.get_all_server_configs(subscription.client_id, plan_name)
-        await xui.close()
-        
-        await callback.answer()
-        for config in all_configs:
-            server_name = config.split('#')[-1].replace('_', ' ')
-            await callback.message.answer(
-                f"🔗 *{server_name}*\n\n"
-                f"`{config}`",
-                parse_mode="Markdown"
-            )
+    await callback.answer()
+    await callback.message.answer(
+        f"🔗 *Ваша ссылка-подписка:*\n`{sub_link}`\n\n"
+        f"Скопируйте её и вставьте в V2RayNG → Add Subscription.\n\n"
+        f"✨ После добавления у вас появятся все серверы:\n"
+        f"🇩🇪 Германия | 🇮🇳 Индия | 🇷🇺 Россия СПБ | 🇮🇹 Италия | 🇹🇷 Турция",
+        parse_mode="Markdown"
+    )
