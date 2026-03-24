@@ -2,14 +2,15 @@ from aiogram import Router, types
 from aiogram.filters import Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from database.session import AsyncSessionLocal
-from database.crud import get_all_plans
+from database.crud import get_all_active_plans, get_plan
 
 router = Router()
+
 
 @router.message(Command('buy'))
 async def show_plans(message: types.Message):
     async with AsyncSessionLocal() as session:
-        plans = await get_all_plans(session)
+        plans = await get_all_active_plans(session)  # ← исправлено
         if not plans:
             await message.answer("Тарифы временно недоступны.")
             return
@@ -20,12 +21,12 @@ async def show_plans(message: types.Message):
         builder.adjust(1)
         await message.answer("Выберите тариф:", reply_markup=builder.as_markup())
 
+
 @router.callback_query(lambda c: c.data.startswith('plan_'))
 async def plan_selected(callback: types.CallbackQuery):
     plan_id = int(callback.data.split('_')[1])
     async with AsyncSessionLocal() as session:
-        from database.crud import get_active_plan
-        plan = await get_active_plan(session, plan_id)
+        plan = await get_plan(session, plan_id)  # ← исправлено
         if not plan:
             await callback.answer("Тариф не найден")
             return
