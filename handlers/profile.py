@@ -7,7 +7,7 @@ from database.session import AsyncSessionLocal
 from database.crud import get_user, get_user_active_subscription, get_plan
 from database.models import User, Trial, Subscription
 from vpn.xui import XUIClient
-from config import MOCK_MODE, XUI_HOST, XUI_USERNAME, XUI_PASSWORD, SERVERS
+from config import MOCK_MODE, XUI_HOST, XUI_USERNAME, XUI_PASSWORD
 import logging
 
 router = Router()
@@ -22,9 +22,21 @@ async def get_referral_count(session, user_id: int) -> int:
     return result.scalar() or 0
 
 
-async def get_server_count() -> int:
-    """Получить количество доступных серверов"""
-    return len(SERVERS)
+async def get_total_traffic(client_id: str) -> float:
+    """Получить суммарный трафик по всем серверам"""
+    if MOCK_MODE or not client_id or client_id.startswith('mock'):
+        return 0.0
+    
+    try:
+        xui = XUIClient(XUI_HOST, XUI_USERNAME, XUI_PASSWORD)
+        stats = await xui.get_client_all_inbounds(client_id)
+        await xui.close()
+        if stats:
+            return stats.get('total', 0) / (1024**3)
+    except Exception as e:
+        logger.error(f"Error getting traffic for {client_id}: {e}")
+    
+    return 0.0
 
 
 @router.callback_query(lambda c: c.data == "profile")
@@ -62,15 +74,10 @@ async def show_profile(callback: types.CallbackQuery):
                 )
                 subscription = subscription.scalar_one_or_none()
         
-        # Получаем количество серверов
-        servers_count = await get_server_count()
-        servers_list = "\n".join([f"  {s['name']}" for s in SERVERS[:5]])
-        if servers_count > 5:
-            servers_list += f"\n  ... и ещё {servers_count - 5} серверов"
-        
         if subscription:
-            end_date_str = subscription.end_date.strftime('%d.%m.%Y')
-            end_time_str = subscription.end_date.strftime('%H:%M')
+            end_date = subscription.end_date
+            end_date_str = end_date.strftime('%d.%m.%Y')
+            end_time_str = end_date.strftime('%H:%M')
             
             # Определяем тип подписки
             if subscription.plan_id:
@@ -79,18 +86,8 @@ async def show_profile(callback: types.CallbackQuery):
             else:
                 plan_name = "🔓 Пробный период"
             
-            # Получаем использование из панели
-            usage_text = ""
-            if not MOCK_MODE and subscription.client_id and not subscription.client_id.startswith('mock'):
-                try:
-                    xui = XUIClient(XUI_HOST, XUI_USERNAME, XUI_PASSWORD)
-                    status = await xui.get_client(subscription.client_id)
-                    await xui.close()
-                    if status:
-                        total_usage = (status.get('up', 0) + status.get('down', 0)) / (1024**3)
-                        usage_text = f"\n📈 Использовано: {total_usage:.2f} GB"
-                except Exception as e:
-                    logger.error(f"Error getting usage: {e}")
+            # Получаем суммарный трафик по всем серверам
+            total_usage = await get_total_traffic(subscription.client_id)
             
             profile_text = (
                 f"👤 *Профиль MILF VPN*\n\n"
@@ -99,9 +96,14 @@ async def show_profile(callback: types.CallbackQuery):
                 f"💰 Баланс: {user.balance} ₽\n"
                 f"👥 Рефералов: {await get_referral_count(session, user.user_id)}\n\n"
                 f"📱 *Активная подписка:* {plan_name}\n"
-                f"📅 Действует до: {end_date_str} в {end_time_str} МСК{usage_text}\n\n"
-                f"🌍 *Доступные серверы:*\n{servers_list}\n\n"
-                f"⚡ *Совет:* Выбирайте сервер с наименьшим пингом для лучшей скорости."
+                f"📅 *Действует до:* {end_date_str} в {end_time_str} МСК\n"
+                f"📈 *Использовано:* {total_usage:.2f} GB\n\n"
+                f"🌍 *Доступные серверы:*\n"
+                f"🇩🇪 Германия (443) | 🇮🇳 Индия (444)\n"
+                f"🇷🇺 Россия СПБ (445) | 🇮🇹 Италия (446)\n"
+                f"🇹🇷 Турция (447)\n\n"
+                f"💡 *Совет:* Подписка работает на всех серверах одновременно.\n"
+                f"Выберите любой сервер в приложении для подключения."
             )
         else:
             profile_text = (
@@ -111,15 +113,16 @@ async def show_profile(callback: types.CallbackQuery):
                 f"💰 Баланс: {user.balance} ₽\n"
                 f"👥 Рефералов: {await get_referral_count(session, user.user_id)}\n\n"
                 f"📱 *Подписка:* Нет активной подписки\n\n"
-                f"🌍 *Доступные серверы:*\n{servers_list}\n\n"
-                f"🔓 *Попробуйте пробный период — 3 дня бесплатно!*\n"
-                f"💎 *Или выберите тариф в разделе «Выбрать тариф»*"
+                f"🔓 Попробуйте пробный период — 3 дня бесплатно!\n"
+                f"💎 Или выберите тариф в разделе «Выбрать тариф»\n\n"
+                f"🌍 *Доступные серверы после активации:*\n"
+                f"🇩🇪 Германия | 🇮🇳 Индия | 🇷🇺 Россия СПБ | 🇮🇹 Италия | 🇹🇷 Турция"
             )
         
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="💎 Выбрать тариф", callback_data="subscription")],
             [InlineKeyboardButton(text="🔓 Пробный период", callback_data="trial_start")],
-            [InlineKeyboardButton(text="🌍 Список серверов", callback_data="server_list")],
+            [InlineKeyboardButton(text="🔑 Получить подписку", callback_data="get_key")],
             [InlineKeyboardButton(text="◀ Назад", callback_data="main_menu")]
         ])
         
@@ -139,30 +142,3 @@ async def show_profile(callback: types.CallbackQuery):
             )
         
         await callback.answer()
-
-
-@router.callback_query(lambda c: c.data == "server_list")
-async def show_server_list(callback: types.CallbackQuery):
-    """Показать подробный список серверов"""
-    servers_text = ""
-    for i, server in enumerate(SERVERS, 1):
-        servers_text += f"{i}. {server['name']}\n"
-        servers_text += f"   📡 Порт: {server['port']}\n\n"
-    
-    text = (
-        "🌍 *Серверы MILF VPN*\n\n"
-        f"{servers_text}\n"
-        "⚡ *Совет:* Выбирайте сервер с наименьшим пингом.\n"
-        "🔄 Для смены сервера просто нажмите на другую конфигурацию в приложении."
-    )
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="◀ Назад", callback_data="profile")]
-    ])
-    
-    await callback.message.edit_text(
-        text,
-        reply_markup=keyboard,
-        parse_mode="Markdown"
-    )
-    await callback.answer()
