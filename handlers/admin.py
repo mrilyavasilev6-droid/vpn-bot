@@ -6,8 +6,10 @@ from config import ADMIN_IDS
 from database.session import AsyncSessionLocal
 from database.models import Plan, Server, User, Subscription, Transaction, Trial, ReferralBonus
 from database.crud import create_promo_code, get_all_promo_codes
+import logging
 
 router = Router()
+logger = logging.getLogger(__name__)
 
 
 def is_admin(user_id: int) -> bool:
@@ -18,14 +20,25 @@ def is_admin(user_id: int) -> bool:
 async def admin_panel(message: types.Message):
     await message.answer(
         "👑 *Админ-панель MILF VPN*\n\n"
-        "/stat - статистика\n"
+        "📊 *Статистика:*\n"
+        "/stat - общая статистика\n"
+        "/server_stats - статистика по серверам\n\n"
+        "📦 *Тарифы:*\n"
         "/add_plan \"Название\" дни цена_звёзды цена_рубли_копейки\n"
         "/del_plan <id> - удалить тариф\n"
+        "/list_plans - список тарифов\n\n"
+        "🖥️ *Серверы:*\n"
         "/servers - список серверов\n"
-        "/add_server - добавить сервер\n"
-        "/clear_trial [user_id] - очистить пробный период пользователя\n"
-        "/create_promo <дни> <макс_использований> [код] - создать промокод\n"
-        "/list_promo - список промокодов",
+        "/add_server - добавить сервер\n\n"
+        "🎁 *Промокоды:*\n"
+        "/create_promo <дни> <макс_использований> [код]\n"
+        "/list_promo - список промокодов\n\n"
+        "🔧 *Управление пользователями:*\n"
+        "/clear_trial [user_id] - очистить пробный период\n"
+        "/user_info <user_id> - информация о пользователе\n"
+        "/ban_user <user_id> - заблокировать пользователя\n\n"
+        "📤 *Экспорт:*\n"
+        "/export_users - экспорт пользователей (CSV)",
         parse_mode="Markdown"
     )
 
@@ -91,12 +104,36 @@ async def delete_plan(message: types.Message):
     await message.answer(f"✅ Тариф *{plan.name}* отключён (ID: {plan_id})", parse_mode="Markdown")
 
 
+@router.message(Command('list_plans'), F.from_user.id.in_(ADMIN_IDS))
+async def list_plans(message: types.Message):
+    """Список всех тарифов"""
+    async with AsyncSessionLocal() as session:
+        plans = await session.execute(select(Plan).order_by(Plan.id))
+        plans = plans.scalars().all()
+        
+        if not plans:
+            await message.answer("📭 Нет тарифов")
+            return
+        
+        text = "📦 *Список тарифов:*\n\n"
+        for plan in plans:
+            status = "✅" if plan.is_active else "❌"
+            text += f"{status} *{plan.id}*. {plan.name}\n"
+            text += f"   📅 {plan.duration_days} дней\n"
+            text += f"   ⭐ {plan.price_stars} звезд | ₽ {plan.price_rub/100}\n\n"
+        
+        await message.answer(text, parse_mode="Markdown")
+
+
 @router.message(Command('stat'), F.from_user.id.in_(ADMIN_IDS))
 async def stats(message: types.Message):
     async with AsyncSessionLocal() as session:
         total_users = await session.execute(select(func.count()).select_from(User))
         active_subs = await session.execute(
             select(func.count()).select_from(Subscription).where(Subscription.is_active == True)
+        )
+        trial_active = await session.execute(
+            select(func.count()).select_from(Trial).where(Trial.is_active == True)
         )
         income_stars = await session.execute(
             select(func.sum(Transaction.amount)).where(
@@ -118,10 +155,46 @@ async def stats(message: types.Message):
             f"📊 *Статистика MILF VPN*\n\n"
             f"👥 Всего пользователей: {total_users.scalar() or 0}\n"
             f"✅ Активных подписок: {active_subs.scalar() or 0}\n"
+            f"🔓 Активных триалов: {trial_active.scalar() or 0}\n"
             f"⭐ Доход (звёзды): {stars}\n"
             f"💰 Доход (рубли): {rub/100:.2f} ₽",
             parse_mode="Markdown"
         )
+
+
+@router.message(Command('server_stats'), F.from_user.id.in_(ADMIN_IDS))
+async def server_stats(message: types.Message):
+    """Статистика по серверам"""
+    async with AsyncSessionLocal() as session:
+        servers = await session.execute(select(Server))
+        servers = servers.scalars().all()
+        
+        if not servers:
+            await message.answer("📭 Нет серверов")
+            return
+        
+        # Список инбаундов с портами
+        inbounds = [
+            {"id": 2, "port": 443, "name": "Германия"},
+            {"id": 3, "port": 444, "name": "Индия"},
+            {"id": 4, "port": 445, "name": "Россия СПБ"},
+            {"id": 5, "port": 446, "name": "Италия"},
+            {"id": 6, "port": 447, "name": "Турция"},
+        ]
+        
+        text = "🖥️ *Статистика серверов*\n\n"
+        
+        for inbound in inbounds:
+            text += f"**{inbound['name']}** (порт {inbound['port']})\n"
+            text += f"   🆔 ID инбаунда: {inbound['id']}\n\n"
+        
+        text += "\n📊 *Общая информация:*\n"
+        for s in servers:
+            text += f"📍 {s.name} ({s.location})\n"
+            text += f"   👥 Клиентов: {s.current_clients}/{s.max_clients}\n"
+            text += f"   📡 {s.host}\n\n"
+        
+        await message.answer(text, parse_mode="Markdown")
 
 
 @router.message(Command('servers'), F.from_user.id.in_(ADMIN_IDS))
@@ -189,7 +262,6 @@ async def clear_trial(message: types.Message):
     """Очистить пробный период пользователя: /clear_trial [user_id]"""
     args = message.text.split()
     
-    # Если указан user_id, используем его, иначе свой
     if len(args) > 1:
         try:
             user_id = int(args[1])
@@ -231,6 +303,124 @@ async def clear_trial(message: types.Message):
             f"Пользователь может активировать пробный период заново.",
             parse_mode="Markdown"
         )
+
+
+@router.message(Command('user_info'), F.from_user.id.in_(ADMIN_IDS))
+async def user_info(message: types.Message):
+    """Информация о пользователе: /user_info <user_id>"""
+    args = message.text.split()
+    if len(args) != 2:
+        await message.answer("Используйте: /user_info <user_id>")
+        return
+    
+    try:
+        user_id = int(args[1])
+    except ValueError:
+        await message.answer("❌ ID пользователя должен быть числом")
+        return
+    
+    async with AsyncSessionLocal() as session:
+        user = await session.get(User, user_id)
+        if not user:
+            await message.answer(f"❌ Пользователь {user_id} не найден")
+            return
+        
+        subscriptions = await session.execute(
+            select(Subscription).where(Subscription.user_id == user_id).order_by(Subscription.start_date.desc())
+        )
+        subscriptions = subscriptions.scalars().all()
+        
+        text = f"👤 *Информация о пользователе*\n\n"
+        text += f"🆔 ID: {user.user_id}\n"
+        text += f"📛 Username: @{user.username or 'нет'}\n"
+        text += f"💰 Баланс: {user.balance} ₽\n"
+        text += f"👥 Рефералов: {await get_referral_count(session, user.user_id)}\n"
+        text += f"🎁 Использовал триал: {'✅' if user.trial_used else '❌'}\n\n"
+        
+        text += f"📋 *История подписок:*\n"
+        for sub in subscriptions[:5]:
+            plan_name = "Пробный период"
+            if sub.plan_id:
+                plan = await session.get(Plan, sub.plan_id)
+                plan_name = plan.name if plan else "Неизвестно"
+            text += f"• {plan_name} | до {sub.end_date.strftime('%d.%m.%Y')} | {'✅ активна' if sub.is_active else '❌ истекла'}\n"
+        
+        await message.answer(text, parse_mode="Markdown")
+
+
+@router.message(Command('ban_user'), F.from_user.id.in_(ADMIN_IDS))
+async def ban_user(message: types.Message):
+    """Заблокировать пользователя (отключить подписки)"""
+    args = message.text.split()
+    if len(args) != 2:
+        await message.answer("Используйте: /ban_user <user_id>")
+        return
+    
+    try:
+        user_id = int(args[1])
+    except ValueError:
+        await message.answer("❌ ID пользователя должен быть числом")
+        return
+    
+    async with AsyncSessionLocal() as session:
+        # Деактивируем все активные подписки
+        subscriptions = await session.execute(
+            select(Subscription).where(
+                Subscription.user_id == user_id,
+                Subscription.is_active == True
+            )
+        )
+        subscriptions = subscriptions.scalars().all()
+        
+        for sub in subscriptions:
+            sub.is_active = False
+        
+        await session.commit()
+        
+        await message.answer(
+            f"✅ *Пользователь {user_id} заблокирован*\n\n"
+            f"Деактивировано подписок: {len(subscriptions)}",
+            parse_mode="Markdown"
+        )
+
+
+@router.message(Command('export_users'), F.from_user.id.in_(ADMIN_IDS))
+async def export_users(message: types.Message):
+    """Экспорт пользователей в CSV"""
+    import csv
+    from io import StringIO
+    
+    async with AsyncSessionLocal() as session:
+        users = await session.execute(select(User))
+        users = users.scalars().all()
+        
+        output = StringIO()
+        writer = csv.writer(output)
+        writer.writerow(['ID', 'Username', 'Дата регистрации', 'Баланс', 'Использовал триал', 'Рефералов'])
+        
+        for user in users:
+            referrals = await get_referral_count(session, user.user_id)
+            writer.writerow([
+                user.user_id,
+                user.username or '',
+                user.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+                user.balance / 100,
+                'Да' if user.trial_used else 'Нет',
+                referrals
+            ])
+        
+        output.seek(0)
+        from aiogram.types import BufferedInputFile
+        file = BufferedInputFile(output.getvalue().encode('utf-8'), filename='users.csv')
+        await message.answer_document(file, caption=f"📊 Экспорт пользователей ({len(users)} записей)")
+
+
+async def get_referral_count(session, user_id: int) -> int:
+    """Получить количество рефералов"""
+    result = await session.execute(
+        select(func.count()).select_from(User).where(User.referral_by == user_id)
+    )
+    return result.scalar() or 0
 
 
 @router.message(Command('create_promo'), F.from_user.id.in_(ADMIN_IDS))
