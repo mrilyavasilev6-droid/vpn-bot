@@ -1,11 +1,15 @@
 from aiogram import Router, types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from datetime import datetime
+from sqlalchemy import select
 from database.session import AsyncSessionLocal
-from database.crud import get_user_active_subscription
+from database.crud import get_user_active_subscription, get_plan
+from database.models import Trial, Subscription
 from config import VPN_SERVER_IP, VPN_REALITY_PUBLIC_KEY, VPN_REALITY_SHORT_ID
-from vpn.xui import XUIClient
+import logging
 
 router = Router()
+logger = logging.getLogger(__name__)
 
 
 @router.callback_query(lambda c: c.data == "instructions")
@@ -28,6 +32,7 @@ async def instructions_start(callback: types.CallbackQuery):
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📱 Выбрать платформу", callback_data="choose_platform")],
+        [InlineKeyboardButton(text="🔑 Получить ключ", callback_data="get_key")],
         [InlineKeyboardButton(text="◀ Назад", callback_data="main_menu")]
     ])
     
@@ -135,42 +140,131 @@ async def show_platform_instruction(callback: types.CallbackQuery):
 
 @router.callback_query(lambda c: c.data == "get_key")
 async def get_vpn_key(callback: types.CallbackQuery):
-    """Получить VPN ключ для активной подписки"""
+    """Получить VPN ключ для активной подписки (платной или пробной)"""
+    user_id = callback.from_user.id
+    
     async with AsyncSessionLocal() as session:
-        subscription = await get_user_active_subscription(session, callback.from_user.id)
+        # 1. Проверяем активную платную подписку
+        subscription = await get_user_active_subscription(session, user_id)
+        
+        # 2. Если нет платной, проверяем пробную подписку
+        if not subscription:
+            logger.info(f"No active subscription for user {user_id}, checking trial...")
+            
+            # Находим активную триальную подписку
+            trial = await session.execute(
+                select(Trial).where(
+                    Trial.user_id == user_id,
+                    Trial.is_active == True,
+                    Trial.end_date > datetime.now()
+                )
+            )
+            trial = trial.scalar_one_or_none()
+            
+            if trial:
+                logger.info(f"Found active trial for user {user_id}, ends at {trial.end_date}")
+                
+                # Находим связанную подписку по client_id
+                # Для пробного периода client_id = f"trial_{user_id}" или другой формат
+                # Нужно искать в Subscription с этим user_id
+                subscription = await session.execute(
+                    select(Subscription).where(
+                        Subscription.user_id == user_id,
+                        Subscription.is_active == True,
+                        Subscription.end_date > datetime.now()
+                    )
+                )
+                subscription = subscription.scalar_one_or_none()
+                
+                if subscription:
+                    logger.info(f"Found trial subscription for user {user_id}")
         
         if not subscription:
-            await callback.answer("❌ У вас нет активной подписки. Оформите пробный период или купите тариф.", show_alert=True)
+            logger.warning(f"No active subscription or trial for user {user_id}")
+            await callback.answer(
+                "❌ У вас нет активной подписки.\n\n"
+                "Оформите пробный период или купите тариф в главном меню.",
+                show_alert=True
+            )
             return
         
-        # Получаем план
-        from database.crud import get_plan
-        plan = await get_plan(session, subscription.plan_id)
-        plan_name = plan.name if plan else "VPN"
+        # Определяем название подписки
+        plan_name = "Пробный период"
+        if subscription.plan_id:
+            plan = await get_plan(session, subscription.plan_id)
+            plan_name = plan.name if plan else "VPN"
         
-        # Генерируем ссылку
-        xui = XUIClient(None, None, None)
-        config_link = await xui.get_client_config(
-            client_uuid=subscription.client_id,
-            server_host=VPN_SERVER_IP,
-            plan_name=plan_name,
-            public_key=VPN_REALITY_PUBLIC_KEY,
-            short_id=VPN_REALITY_SHORT_ID
+        # Генерируем vless ссылку
+        config_link = (
+            f"vless://{subscription.client_id}@{VPN_SERVER_IP}:443"
+            f"?type=tcp&security=reality"
+            f"&pbk={VPN_REALITY_PUBLIC_KEY}&fp=chrome"
+            f"&sni=www.cloudflare.com&sid={VPN_REALITY_SHORT_ID}"
+            f"#{plan_name.replace(' ', '_')}"
         )
         
+        # Кнопка копирования
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📋 Скопировать ссылку", callback_data=f"copy_link_{subscription.client_id}")],
             [InlineKeyboardButton(text="◀ Назад", callback_data="instructions")]
         ])
         
         await callback.message.answer(
-            f"🔑 *Ваш ключ подключения:*\n\n"
+            f"🔑 *Ваш ключ подключения ({plan_name}):*\n\n"
             f"`{config_link}`\n\n"
+            f"📅 *Действует до:* {subscription.end_date.strftime('%d.%m.%Y')}\n\n"
             f"📱 *Как подключиться:*\n"
-            f"1. Нажмите на ссылку или скопируйте её\n"
-            f"2. Приложение откроется автоматически\n"
-            f"3. Нажмите ▶️ для подключения",
+            f"1️⃣ Скопируйте ссылку\n"
+            f"2️⃣ Откройте приложение V2RayNG / Streisand\n"
+            f"3️⃣ Нажмите + → Import from clipboard\n"
+            f"4️⃣ Нажмите ▶️ для подключения",
             reply_markup=keyboard,
             parse_mode="Markdown"
         )
+        
+        logger.info(f"Key sent to user {user_id}, expires at {subscription.end_date}")
         await callback.answer()
+
+
+@router.callback_query(lambda c: c.data.startswith("copy_link_"))
+async def copy_link_callback(callback: types.CallbackQuery):
+    """Обработка кнопки копирования ссылки"""
+    client_id = callback.data.split("_")[2]
+    
+    async with AsyncSessionLocal() as session:
+        # Ищем подписку по client_id
+        subscription = await session.execute(
+            select(Subscription).where(
+                Subscription.client_id == client_id,
+                Subscription.is_active == True
+            )
+        )
+        subscription = subscription.scalar_one_or_none()
+        
+        if not subscription:
+            await callback.answer("Подписка не найдена", show_alert=True)
+            return
+        
+        # Определяем название подписки
+        plan_name = "Пробный период"
+        if subscription.plan_id:
+            plan = await get_plan(session, subscription.plan_id)
+            plan_name = plan.name if plan else "VPN"
+        
+        # Генерируем ссылку
+        config_link = (
+            f"vless://{subscription.client_id}@{VPN_SERVER_IP}:443"
+            f"?type=tcp&security=reality"
+            f"&pbk={VPN_REALITY_PUBLIC_KEY}&fp=chrome"
+            f"&sni=www.cloudflare.com&sid={VPN_REALITY_SHORT_ID}"
+            f"#{plan_name.replace(' ', '_')}"
+        )
+        
+        await callback.answer()
+        await callback.message.answer(
+            f"🔗 *Ваша ссылка для подключения:*\n\n"
+            f"`{config_link}`\n\n"
+            f"📅 Действует до: {subscription.end_date.strftime('%d.%m.%Y')}\n\n"
+            f"Скопируйте её и вставьте в приложение V2RayNG / Streisand.",
+            parse_mode="Markdown"
+        )
