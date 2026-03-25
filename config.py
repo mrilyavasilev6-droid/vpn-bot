@@ -3,10 +3,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Telegram Bot
 BOT_TOKEN = os.getenv('BOT_TOKEN')
 ADMIN_IDS = list(map(int, os.getenv('ADMIN_IDS', '').split(',')))
 PROVIDER_TOKEN = os.getenv('PROVIDER_TOKEN')
 
+# Database
 DATABASE_URL = os.getenv('DATABASE_URL')
 if not DATABASE_URL:
     DB_CONFIG = {
@@ -23,59 +25,55 @@ XUI_HOST = os.getenv('XUI_HOST')
 XUI_USERNAME = os.getenv('XUI_USERNAME')
 XUI_PASSWORD = os.getenv('XUI_PASSWORD')
 
-# VPN Server Settings (основной IP)
-VPN_SERVER_IP = os.getenv('VPN_SERVER_IP', '87.242.86.245')
-
-# Режим работы (False = реальный VPN)
+# Mode
 MOCK_MODE = os.getenv('MOCK_MODE', 'True').lower() == 'true'
 
-# ============ СПИСОК СЕРВЕРОВ MILF VPN ============
-# Каждый сервер имеет свой порт, public key и short id
+# ============ VPN Server Configuration ============
+# Общий UUID для всех серверов
+SERVER_UUID = "e869ec05-b749-41fb-9b25-49257cc1e7df"
 
+# IP или домен сервера (для подписки)
+VPN_SERVER_IP = os.getenv('VPN_SERVER_IP', 'panel.3utilities.com')
+
+# Список серверов с их параметрами
 SERVERS = [
     {
-        'name': '🇩🇪 Германия',
-        'port': 443,
-        'public_key': 'wjC29exW1EQR879lFUmoJS9oXfOHCjfEAQcXuH1mIn8',
-        'short_id': '9ed461846d',  # первый из списка Short IDs
-        'sni': 'www.cloudflare.com',
-        'fingerprint': 'chrome'
+        "name": "🇩🇪 Германия",
+        "port": 443,
+        "public_key": "yv6b4Q9VopGCLI0JLaOVtVJZ8PovFE3sO31bPhbgX4",
+        "short_id": "8f3512"
     },
     {
-        'name': '🇮🇳 Индия',
-        'port': 444,
-        'public_key': 'ngBgVGz7Q9ATfpSHC2Svpfr5I_C2Bh5eKxzovFg0MmI',
-        'short_id': '004286430bfc',
-        'sni': 'www.cloudflare.com',
-        'fingerprint': 'chrome'
+        "name": "🇮🇳 Индия",
+        "port": 444,
+        "public_key": "rW97vS_cCKklOO1IFiL5VvVB5uTMtBP2h2o7YhijcIk",
+        "short_id": "8d"
     },
     {
-        'name': '🇷🇺 Россия СПБ',
-        'port': 445,
-        'public_key': 'TPA3ve5H4rSxWxRYIcmBsVLSzEqbPWJt_iYaCPedPiM',
-        'short_id': '4415a4602b',
-        'sni': 'www.cloudflare.com',
-        'fingerprint': 'chrome'
+        "name": "🇷🇺 Россия",
+        "port": 445,
+        "public_key": "czaIL8FZPaoYXIsZfc6G6grhG8E3cwMtUg7r21TELyA",
+        "short_id": "afd9532e1e0f"
     },
     {
-        'name': '🇮🇹 Италия',
-        'port': 446,
-        'public_key': 'GI7SadleegCX9tQAKEfI7JfNVmqgLi0MYzzIr1HhJjQ',
-        'short_id': 'f230491b99',
-        'sni': 'www.cloudflare.com',
-        'fingerprint': 'chrome'
+        "name": "🇮🇹 Италия",
+        "port": 446,
+        "public_key": "rRRlWdFOietYDQjBiLR-wsaoTntU0n_yNdZxufDQDY",
+        "short_id": "6c6ee21d2a8a"
     },
     {
-        'name': '🇹🇷 Турция',
-        'port': 447,
-        'public_key': 'cXCztbc9yw-3kp7PWsKAQ-TiNwBLrQQznF68ic_8ljE',
-        'short_id': '95',
-        'sni': 'www.cloudflare.com',
-        'fingerprint': 'chrome'
-    },
+        "name": "🇹🇷 Турция",
+        "port": 447,
+        "public_key": "BbCdEbN_BIxQAE2ui80nF6JqMBs8UcVCr-93KQP9aiA",
+        "short_id": "e2cbc0e1"
+    }
 ]
 
-# Для обратной совместимости (основной сервер - Германия)
-VPN_REALITY_PUBLIC_KEY = SERVERS[0]['public_key']
-VPN_REALITY_SHORT_ID = SERVERS[0]['short_id']
-VPN_REALITY_SNI = SERVERS[0]['sni']
+# Ссылка-подписка (единая для всех серверов)
+SUBSCRIPTION_URL = "http://panel.3utilities.com:2096/sub/milf_vpn_sub"
+
+# Reality общие настройки
+REALITY_SNI = "www.cloudflare.com"
+REALITY_FINGERPRINT = "chrome"
+REALITY_TYPE = "tcp"
+REALITY_SECURITY = "reality"
