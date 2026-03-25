@@ -6,7 +6,10 @@ from sqlalchemy import select, delete
 from database.session import AsyncSessionLocal
 from database.models import User, Trial, Subscription
 from vpn.xui import XUIClient
-from config import XUI_HOST, XUI_USERNAME, XUI_PASSWORD, MOCK_MODE, VPN_SERVER_IP, VPN_REALITY_PUBLIC_KEY, VPN_REALITY_SHORT_ID
+from config import (
+    XUI_HOST, XUI_USERNAME, XUI_PASSWORD, MOCK_MODE, 
+    VPN_SERVER_IP, SERVERS, REALITY_SNI, REALITY_FINGERPRINT
+)
 import logging
 
 router = Router()
@@ -108,19 +111,16 @@ async def trial_start(callback: types.CallbackQuery):
         # Используем уникальный email с timestamp
         email = f"trial_{user_id}_{int(time.time())}"
         
-        # Название сервера (можно вынести в config)
-        server_name = "Frankfurt"
+        # Берём первый сервер (Германия) для пробного периода
+        first_server = SERVERS[0]
         
         if MOCK_MODE:
             client_id = f"mock_trial_{user_id}"
-            plan_display_name = f"MILF VPN - {server_name} (Trial)"
-            config_link = f"vless://mock@{VPN_SERVER_IP}:443?type=tcp&security=reality#{plan_display_name.replace(' ', '_')}"
-            sub_link = f"http://87.242.86.245:49828/bJGC3webPGJwCrGw5e/sub/{client_id}"
+            config_link = f"vless://mock@{VPN_SERVER_IP}:{first_server['port']}?type=tcp&security=reality#Mock_Trial"
         else:
             try:
                 xui = XUIClient(XUI_HOST, XUI_USERNAME, XUI_PASSWORD)
-                # Добавляем клиента во все инбаунды
-                client_id = await xui.add_client_to_all_inbounds(trial_days, email=email)
+                client_id = await xui.add_client(trial_days, email=email)
                 await xui.close()
                 
                 if not client_id:
@@ -130,8 +130,15 @@ async def trial_start(callback: types.CallbackQuery):
                     return
                 else:
                     logger.info(f"Client created with UUID: {client_id}, email: {email}")
-                    plan_display_name = f"MILF VPN - {server_name} (Trial)"
-                    sub_link = f"http://87.242.86.245:49828/bJGC3webPGJwCrGw5e/sub/{client_id}"
+                    
+                    # Генерируем ссылку для пробного периода (используем Германию)
+                    config_link = (
+                        f"vless://{client_id}@{VPN_SERVER_IP}:{first_server['port']}"
+                        f"?type=tcp&security=reality"
+                        f"&pbk={first_server['public_key']}&fp={REALITY_FINGERPRINT}"
+                        f"&sni={REALITY_SNI}&sid={first_server['short_id']}"
+                        f"#Trial"
+                    )
             except Exception as e:
                 logger.error(f"Error creating client: {e}")
                 await callback.message.answer("❌ Ошибка подключения к VPN серверу. Попробуйте позже.")
@@ -184,16 +191,16 @@ async def trial_start(callback: types.CallbackQuery):
         
         await callback.message.answer(
             f"🎉 *Пробный период 3 дня активирован!*\n\n"
-            f"🔗 *Ваша ссылка-подписка:*\n`{sub_link}`\n\n"
+            f"🔑 *Ваш ключ:*\n`{config_link}`\n\n"
             f"📅 *Действует до:* {end_date_str} в {end_time_str} МСК\n\n"
-            f"📱 *Как добавить в V2RayNG:*\n"
+            f"📱 *Как подключиться:*\n"
             f"1️⃣ Скачайте V2RayNG (Android) или Streisand (iOS)\n"
-            f"2️⃣ Нажмите + → Add Subscription\n"
+            f"2️⃣ Нажмите + → Import from clipboard\n"
             f"3️⃣ Вставьте ссылку\n"
-            f"4️⃣ Нажмите обновить\n\n"
-            f"✨ Доступные серверы:\n"
-            f"🇩🇪 Германия | 🇮🇳 Индия | 🇷🇺 Россия СПБ | 🇮🇹 Италия | 🇹🇷 Турция\n\n"
-            f"📖 Подробная инструкция: /instructions",
+            f"4️⃣ Нажмите ▶️ для подключения\n\n"
+            f"Инструкцию можно найти в меню «Инструкция»\n\n"
+            f"🌍 *После активации платной подписки вы получите доступ ко всем серверам:*\n"
+            f"🇩🇪 Германия | 🇮🇳 Индия | 🇷🇺 Россия | 🇮🇹 Италия | 🇹🇷 Турция",
             reply_markup=keyboard,
             parse_mode="Markdown"
         )
