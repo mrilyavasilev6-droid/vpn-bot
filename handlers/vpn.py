@@ -52,11 +52,34 @@ async def test_vpn_connection(message: types.Message):
         await xui.close()
 
 
+@router.message(Command("vpn_servers"))
+async def list_vpn_servers(message: types.Message):
+    """Показать список доступных VPN-серверов"""
+    servers_text = "🌍 *Доступные серверы MILF VPN:*\n\n"
+    for s in SERVERS:
+        servers_text += f"{s['name']}\n"
+        servers_text += f"   📡 Порт: {s['port']}\n"
+        servers_text += f"   🔑 Short ID: {s['short_id'][:8]}...\n\n"
+    
+    await message.answer(servers_text, parse_mode="Markdown")
+
+
+@router.message(Command("servers_info"))
+async def servers_info(message: types.Message):
+    """Альтернативная команда для списка серверов (без конфликта)"""
+    servers_text = "🌍 *Серверы MILF VPN:*\n\n"
+    for i, s in enumerate(SERVERS, 1):
+        servers_text += f"{i}. {s['name']} (порт {s['port']})\n"
+    
+    await message.answer(servers_text, parse_mode="Markdown")
+
+
 @router.callback_query(lambda c: c.data.startswith("copy_vpn_"))
 async def copy_vpn_link(callback: types.CallbackQuery):
     """Скопировать VPN ссылку (для конкретного сервера)"""
-    client_id = callback.data.split("_")[2]
-    server_index = int(callback.data.split("_")[3]) if len(callback.data.split("_")) > 3 else 0
+    parts = callback.data.split("_")
+    client_id = parts[2]
+    server_index = int(parts[3]) if len(parts) > 3 else 0
     
     if MOCK_MODE:
         config_link = f"vless://mock@{VPN_SERVER_IP}:443?type=tcp&security=reality#Test_VPN"
@@ -76,24 +99,25 @@ async def copy_vpn_link(callback: types.CallbackQuery):
             )
             await xui.close()
         else:
-            # fallback
-            config_link = f"vless://{client_id}@{VPN_SERVER_IP}:443?type=tcp&security=reality#MILF_VPN"
+            # fallback на первый сервер
+            server = SERVERS[0]
+            xui = get_xui_client()
+            config_link = await xui.get_client_config(
+                client_uuid=client_id,
+                server_host=VPN_SERVER_IP,
+                port=server['port'],
+                public_key=server['public_key'],
+                short_id=server['short_id'],
+                name=server['name'],
+                sni=REALITY_SNI,
+                fingerprint=REALITY_FINGERPRINT
+            )
+            await xui.close()
     
     await callback.answer()
     await callback.message.answer(
         f"🔗 *Ваша ссылка:*\n`{config_link}`\n\n"
-        f"Скопируйте её и вставьте в V2RayNG.",
+        f"Скопируйте её и вставьте в V2RayNG.\n\n"
+        f"💡 *Совет:* Используйте `/vpn_servers` для просмотра всех доступных серверов.",
         parse_mode="Markdown"
     )
-
-
-@router.message(Command("servers"))
-async def list_servers(message: types.Message):
-    """Показать список доступных серверов"""
-    servers_text = "🌍 *Доступные серверы MILF VPN:*\n\n"
-    for s in SERVERS:
-        servers_text += f"{s['name']}\n"
-        servers_text += f"   📡 Порт: {s['port']}\n"
-        servers_text += f"   🔑 Short ID: {s['short_id'][:8]}...\n\n"
-    
-    await message.answer(servers_text, parse_mode="Markdown")
