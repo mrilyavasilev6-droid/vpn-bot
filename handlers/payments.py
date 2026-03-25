@@ -1,7 +1,10 @@
 from aiogram import Router, types
 from aiogram.types import LabeledPrice, PreCheckoutQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
-from config import PROVIDER_TOKEN, MOCK_MODE
+from config import (
+    PROVIDER_TOKEN, MOCK_MODE, XUI_HOST, XUI_USERNAME, XUI_PASSWORD,
+    VPN_SERVER_IP, SERVERS, SERVER_UUID, SUBSCRIPTION_URL, REALITY_SNI, REALITY_FINGERPRINT
+)
 from database.session import AsyncSessionLocal
 from database.crud import get_plan, get_least_loaded_server, add_subscription, add_transaction, get_user
 from vpn.xui import XUIClient
@@ -9,6 +12,7 @@ import datetime
 import logging
 
 router = Router()
+logger = logging.getLogger(__name__)
 
 
 @router.pre_checkout_query()
@@ -28,7 +32,7 @@ async def successful_payment(message: types.Message):
         plan_id = int(plan_id_str)
         user_id = int(user_id_str)
     except Exception as e:
-        logging.error(f"Error parsing payload: {e}")
+        logger.error(f"Error parsing payload: {e}")
         await message.answer("❌ Ошибка обработки платежа. Обратитесь к администратору.")
         return
 
@@ -48,29 +52,42 @@ async def successful_payment(message: types.Message):
         # Получаем сервер (если используется несколько)
         server = await get_least_loaded_server(session)
         
-        from config import XUI_HOST, XUI_USERNAME, XUI_PASSWORD, VPN_SERVER_IP
-        
         # Создаем клиента в панели
         xui = XUIClient(XUI_HOST, XUI_USERNAME, XUI_PASSWORD)
-        
-        # Название сервера
-        server_name = "Frankfurt"
         
         if MOCK_MODE:
             # Тестовый режим
             client_id = f"mock_{user_id}_{datetime.datetime.now().timestamp()}"
-            plan_display_name = f"MILF VPN - {server_name} ({plan.name})"
-            sub_link = f"http://87.242.86.245:49828/bJGC3webPGJwCrGw5e/sub/{client_id}"
+            # Генерируем тестовые ссылки
+            links_text = ""
+            for s in SERVERS:
+                links_text += f"{s['name']}\n`vless://mock@{VPN_SERVER_IP}:{s['port']}?type=tcp&security=reality#Mock_{s['name']}`\n\n"
         else:
-            # Добавляем клиента во все инбаунды
-            client_id = await xui.add_client_to_all_inbounds(plan.duration_days, email=f"tg_{user_id}")
+            # Создаем клиента в панели
+            email = f"tg_{user_id}_{int(datetime.datetime.now().timestamp())}"
+            client_id = await xui.add_client(plan.duration_days, email=email)
+            
             if not client_id:
                 await message.answer("❌ Ошибка создания подписки. Попробуйте позже.")
                 await xui.close()
                 return
             
-            # Генерируем ссылку-подписку
-            sub_link = f"http://87.242.86.245:49828/bJGC3webPGJwCrGw5e/sub/{client_id}"
+            logger.info(f"Client created: {client_id} for user {user_id}")
+            
+            # Генерируем ссылки для всех серверов
+            server_host = VPN_SERVER_IP or "panel.3utilities.com"
+            links = await xui.get_all_configs(
+                client_uuid=client_id,
+                server_host=server_host,
+                servers=SERVERS,
+                sni=REALITY_SNI,
+                fingerprint=REALITY_FINGERPRINT
+            )
+            
+            # Форматируем ссылки для отправки
+            links_text = ""
+            for i, s in enumerate(SERVERS):
+                links_text += f"{s['name']}\n`{links[i]}`\n\n"
         
         # Сохраняем подписку в БД
         end_date = datetime.datetime.now() + datetime.timedelta(days=plan.duration_days)
@@ -102,59 +119,39 @@ async def successful_payment(message: types.Message):
         
         await xui.close()
         
-        # Клавиатура с кнопкой открыть ссылку
+        # Клавиатура с кнопками
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="📱 Добавить в V2RayNG", url=sub_link)],
-            [InlineKeyboardButton(text="📋 Копировать ссылку", callback_data=f"copy_sub_{client_id}")],
+            [InlineKeyboardButton(text="🔗 Добавить подписку", url=SUBSCRIPTION_URL)],
+            [InlineKeyboardButton(text="📋 Скопировать ссылки", callback_data=f"copy_links_{client_id}")],
             [InlineKeyboardButton(text="◀ Главное меню", callback_data="main_menu")]
         ])
         
-        end_date_str = end_date.strftime('%d.%m.%Y')
-        end_time_str = end_date.strftime('%H:%M')
-        
         await message.answer(
             f"✅ *Подписка {plan.name} активирована!*\n\n"
-            f"📅 *Действует до:* {end_date_str} в {end_time_str} МСК\n\n"
-            f"🔗 *Ваша ссылка-подписка:*\n"
-            f"`{sub_link}`\n\n"
-            f"📱 *Как добавить в V2RayNG:*\n"
-            f"1️⃣ Скачайте V2RayNG (Android) или Streisand (iOS)\n"
-            f"2️⃣ Нажмите + → Add Subscription\n"
-            f"3️⃣ Вставьте ссылку\n"
-            f"4️⃣ Нажмите обновить\n\n"
-            f"✨ *Доступные серверы:*\n"
-            f"🇩🇪 Германия | 🇮🇳 Индия | 🇷🇺 Россия СПБ | 🇮🇹 Италия | 🇹🇷 Турция\n\n"
-            f"📖 *Инструкция:* /instructions",
+            f"📅 *Действует до:* {end_date.strftime('%d.%m.%Y')}\n\n"
+            f"🌍 *Ваши серверы:*\n\n{links_text}\n"
+            f"🔗 *Или добавьте одну подписку:*\n"
+            f"`{SUBSCRIPTION_URL}`\n\n"
+            f"📱 *Как подключиться:*\n"
+            f"1️⃣ Скопируйте ссылку нужного сервера или добавьте подписку\n"
+            f"2️⃣ Откройте V2RayNG → + → Import from clipboard / Add Subscription\n"
+            f"3️⃣ Нажмите ▶️ для подключения\n\n"
+            f"⚡ *Совет:* Выберите сервер с наименьшим пингом",
             reply_markup=keyboard,
             parse_mode="Markdown"
         )
 
 
-@router.callback_query(lambda c: c.data.startswith("copy_sub_"))
-async def copy_sub_link(callback: types.CallbackQuery):
-    """Обработка кнопки копирования ссылки-подписки"""
-    client_id = callback.data.split("_")[2]
-    sub_link = f"http://87.242.86.245:49828/bJGC3webPGJwCrGw5e/sub/{client_id}"
-    
-    await callback.answer()
-    await callback.message.answer(
-        f"🔗 *Ваша ссылка-подписка:*\n`{sub_link}`\n\n"
-        f"Скопируйте её и вставьте в V2RayNG → Add Subscription.\n\n"
-        f"✨ После добавления у вас появятся все серверы:\n"
-        f"🇩🇪 Германия | 🇮🇳 Индия | 🇷🇺 Россия СПБ | 🇮🇹 Италия | 🇹🇷 Турция",
-        parse_mode="Markdown"
-    )
-
-
-@router.callback_query(lambda c: c.data.startswith("copy_link_"))
-async def copy_link_callback(callback: types.CallbackQuery):
-    """Обработка кнопки копирования ссылки (старый формат, для совместимости)"""
+@router.callback_query(lambda c: c.data.startswith("copy_links_"))
+async def copy_links_callback(callback: types.CallbackQuery):
+    """Обработка кнопки копирования ссылок"""
     client_id = callback.data.split("_")[2]
     
     async with AsyncSessionLocal() as session:
         from database.models import Subscription, Plan
         from sqlalchemy import select
         
+        # Ищем подписку
         result = await session.execute(
             select(Subscription, Plan)
             .join(Plan, Subscription.plan_id == Plan.id)
@@ -162,26 +159,8 @@ async def copy_link_callback(callback: types.CallbackQuery):
         )
         sub_plan = result.first()
         
-        if sub_plan:
-            sub, plan = sub_plan
-            from config import VPN_SERVER_IP
-            
-            server_name = "Frankfurt"
-            plan_display_name = f"MILF VPN - {server_name} ({plan.name})"
-            
-            sub_link = f"http://87.242.86.245:49828/bJGC3webPGJwCrGw5e/sub/{client_id}"
-            
-            await callback.answer()
-            await callback.message.answer(
-                f"🔗 *Ваша ссылка-подписка ({plan_display_name}):*\n\n"
-                f"`{sub_link}`\n\n"
-                f"📅 *Действует до:* {sub.end_date.strftime('%d.%m.%Y')}\n\n"
-                f"Скопируйте её и вставьте в V2RayNG → Add Subscription.",
-                parse_mode="Markdown"
-            )
-        else:
-            # Если не нашли в платных, ищем в пробных
-            from database.models import Subscription
+        if not sub_plan:
+            # Пробуем найти без плана (пробный период)
             sub = await session.execute(
                 select(Subscription).where(
                     Subscription.client_id == client_id,
@@ -189,22 +168,34 @@ async def copy_link_callback(callback: types.CallbackQuery):
                 )
             )
             sub = sub.scalar_one_or_none()
-            
             if sub:
-                from config import VPN_SERVER_IP, VPN_REALITY_PUBLIC_KEY, VPN_REALITY_SHORT_ID
-                
-                server_name = "Frankfurt"
-                plan_display_name = "MILF VPN - Frankfurt (Trial)"
-                
-                sub_link = f"http://87.242.86.245:49828/bJGC3webPGJwCrGw5e/sub/{client_id}"
-                
-                await callback.answer()
-                await callback.message.answer(
-                    f"🔗 *Ваша ссылка-подписка ({plan_display_name}):*\n\n"
-                    f"`{sub_link}`\n\n"
-                    f"📅 *Действует до:* {sub.end_date.strftime('%d.%m.%Y')}\n\n"
-                    f"Скопируйте её и вставьте в V2RayNG → Add Subscription.",
-                    parse_mode="Markdown"
-                )
+                plan_name = "Пробный период"
             else:
-                await callback.answer("❌ Подписка не найдена", show_alert=True)
+                await callback.answer("Подписка не найдена", show_alert=True)
+                return
+        else:
+            sub, plan = sub_plan
+            plan_name = plan.name
+        
+        # Генерируем ссылки
+        xui = XUIClient(None, None, None)
+        server_host = VPN_SERVER_IP or "panel.3utilities.com"
+        links = await xui.get_all_configs(
+            client_uuid=client_id,
+            server_host=server_host,
+            servers=SERVERS,
+            sni=REALITY_SNI,
+            fingerprint=REALITY_FINGERPRINT
+        )
+        
+        links_text = ""
+        for i, s in enumerate(SERVERS):
+            links_text += f"{s['name']}\n`{links[i]}`\n\n"
+        
+        await callback.answer()
+        await callback.message.answer(
+            f"🔗 *Ваши ссылки ({plan_name}):*\n\n{links_text}\n"
+            f"📅 *Действует до:* {sub.end_date.strftime('%d.%m.%Y')}\n\n"
+            f"Скопируйте ссылки и вставьте в V2RayNG.",
+            parse_mode="Markdown"
+        )
