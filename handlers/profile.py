@@ -7,7 +7,7 @@ from database.session import AsyncSessionLocal
 from database.crud import get_user, get_user_active_subscription, get_plan
 from database.models import User, Trial, Subscription
 from vpn.xui import XUIClient
-from config import MOCK_MODE, XUI_HOST, XUI_USERNAME, XUI_PASSWORD
+from config import MOCK_MODE, XUI_HOST, XUI_USERNAME, XUI_PASSWORD, SERVERS
 import logging
 
 router = Router()
@@ -29,14 +29,22 @@ async def get_total_traffic(client_id: str) -> float:
     
     try:
         xui = XUIClient(XUI_HOST, XUI_USERNAME, XUI_PASSWORD)
-        stats = await xui.get_client_all_inbounds(client_id)
+        stats = await xui.get_client(client_id)
         await xui.close()
         if stats:
-            return stats.get('total', 0) / (1024**3)
+            return (stats.get('up', 0) + stats.get('down', 0)) / (1024**3)
     except Exception as e:
         logger.error(f"Error getting traffic for {client_id}: {e}")
     
     return 0.0
+
+
+def get_servers_list() -> str:
+    """Сформировать список серверов для отображения"""
+    servers_text = ""
+    for s in SERVERS:
+        servers_text += f"{s['name']} ({s['port']}) | "
+    return servers_text[:-3]  # убираем последний " | "
 
 
 @router.callback_query(lambda c: c.data == "profile")
@@ -98,10 +106,7 @@ async def show_profile(callback: types.CallbackQuery):
                 f"📱 *Активная подписка:* {plan_name}\n"
                 f"📅 *Действует до:* {end_date_str} в {end_time_str} МСК\n"
                 f"📈 *Использовано:* {total_usage:.2f} GB\n\n"
-                f"🌍 *Доступные серверы:*\n"
-                f"🇩🇪 Германия (443) | 🇮🇳 Индия (444)\n"
-                f"🇷🇺 Россия СПБ (445) | 🇮🇹 Италия (446)\n"
-                f"🇹🇷 Турция (447)\n\n"
+                f"🌍 *Доступные серверы:*\n{get_servers_list()}\n\n"
                 f"💡 *Совет:* Подписка работает на всех серверах одновременно.\n"
                 f"Выберите любой сервер в приложении для подключения."
             )
@@ -115,8 +120,7 @@ async def show_profile(callback: types.CallbackQuery):
                 f"📱 *Подписка:* Нет активной подписки\n\n"
                 f"🔓 Попробуйте пробный период — 3 дня бесплатно!\n"
                 f"💎 Или выберите тариф в разделе «Выбрать тариф»\n\n"
-                f"🌍 *Доступные серверы после активации:*\n"
-                f"🇩🇪 Германия | 🇮🇳 Индия | 🇷🇺 Россия СПБ | 🇮🇹 Италия | 🇹🇷 Турция"
+                f"🌍 *Доступные серверы после активации:*\n{get_servers_list()}"
             )
         
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -134,7 +138,7 @@ async def show_profile(callback: types.CallbackQuery):
                 parse_mode="Markdown"
             )
         except Exception:
-            # Если не удалось отредактировать (например, сообщение с фото), отправляем новое
+            # Если не удалось отредактировать, отправляем новое
             await callback.message.answer(
                 profile_text,
                 reply_markup=keyboard,
