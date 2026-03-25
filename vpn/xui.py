@@ -4,7 +4,7 @@ import uuid
 import urllib.parse
 import os
 from datetime import datetime, timedelta
-from typing import Optional, Dict
+from typing import Optional, Dict, List
 import logging
 
 logger = logging.getLogger(__name__)
@@ -19,7 +19,7 @@ class XUIClient:
         self.password = password
         self._session = None
         self._cookies = None
-        self._inbound_id = 1  # ID инбаунда по умолчанию
+        self._inbound_id = 1  # ID инбаунда (у вас 1)
         logger.info(f"XUIClient initialized with api_url: {self.api_url}")
 
     async def _get_session(self) -> aiohttp.ClientSession:
@@ -48,7 +48,6 @@ class XUIClient:
 
     async def _request(self, method: str, endpoint: str, data: Dict = None) -> Optional[Dict]:
         """Выполнить запрос к API"""
-        # Принудительно авторизуемся перед каждым запросом
         if not self._cookies:
             await self._login()
         
@@ -83,7 +82,7 @@ class XUIClient:
                 return None
 
     async def add_client(self, days: int = 30, email: str = None) -> Optional[str]:
-        """Создать нового клиента на сервере (только в один инбаунд)"""
+        """Создать нового клиента на сервере"""
         logger.info(f"📝 add_client called: days={days}, email={email}")
         
         client_uuid = str(uuid.uuid4())
@@ -108,6 +107,7 @@ class XUIClient:
         }
         
         logger.info(f"Sending add_client request for email: {email}")
+        logger.debug(f"Payload: {json.dumps(payload, ensure_ascii=False)}")
         
         result = await self._request('POST', '/panel/api/inbounds/addClient', payload)
         
@@ -118,158 +118,86 @@ class XUIClient:
         logger.error(f"❌ Failed to create client: {result}")
         return None
 
-    async def add_client_to_all_inbounds(self, days: int = 30, email: str = None) -> Optional[str]:
-        """Создать клиента во всех инбаундах с одним UUID"""
-        
-        # Создаём один UUID для всех серверов
-        client_uuid = str(uuid.uuid4())
-        expire_timestamp = int((datetime.now() + timedelta(days=days)).timestamp() * 1000)
-        
-        if not email:
-            email = f"user_{client_uuid[:8]}"
-        
-        # Список всех инбаундов (ID, порт, название)
-        # ID инбаундов из вашей панели: 2-Германия, 3-Индия, 4-Россия, 5-Италия, 6-Турция
-        inbounds = [
-            {"id": 2, "port": 443, "name": "Германия"},
-            {"id": 3, "port": 444, "name": "Индия"},
-            {"id": 4, "port": 445, "name": "Россия СПБ"},
-            {"id": 5, "port": 446, "name": "Италия"},
-            {"id": 6, "port": 447, "name": "Турция"},
-        ]
-        
-        success_count = 0
-        
-        for inbound in inbounds:
-            payload = {
-                "id": inbound["id"],
-                "settings": json.dumps({
-                    "clients": [{
-                        "id": client_uuid,
-                        "email": email,
-                        "expireTime": expire_timestamp,
-                        "enable": True,
-                        "flow": "xtls-rprx-vision",
-                        "limitIp": 1,
-                        "totalGB": 0
-                    }]
-                })
-            }
-            
-            logger.info(f"Adding client to inbound {inbound['id']} ({inbound['name']})")
-            
-            result = await self._request('POST', '/panel/api/inbounds/addClient', payload)
-            
-            if result and result.get('success'):
-                success_count += 1
-                logger.info(f"✅ Client added to {inbound['name']}")
-            else:
-                logger.error(f"❌ Failed to add client to {inbound['name']}: {result}")
-        
-        if success_count > 0:
-            logger.info(f"✅ Client created in {success_count}/{len(inbounds)} inbounds")
-            return client_uuid
-        
-        return None
-
     async def delete_client(self, client_uuid: str) -> bool:
-        """Удалить клиента из всех инбаундов"""
-        # Список всех инбаундов
-        inbounds = [2, 3, 4, 5, 6]
-        success_count = 0
+        """Удалить клиента"""
+        payload = {"id": self._inbound_id, "clientId": client_uuid}
+        result = await self._request('POST', '/panel/api/inbounds/delClient', payload)
         
-        for inbound_id in inbounds:
-            payload = {"id": inbound_id, "clientId": client_uuid}
-            result = await self._request('POST', '/panel/api/inbounds/delClient', payload)
-            
-            if result and result.get('success'):
-                success_count += 1
-                logger.info(f"✅ Client deleted from inbound {inbound_id}")
-            else:
-                logger.error(f"❌ Failed to delete client from inbound {inbound_id}: {result}")
+        if result and result.get('success'):
+            logger.info(f"✅ Client deleted: {client_uuid}")
+            return True
         
-        return success_count > 0
+        logger.error(f"❌ Failed to delete client: {result}")
+        return False
 
     async def get_client(self, client_uuid: str) -> Optional[Dict]:
-        """Получить информацию о клиенте по UUID (из первого инбаунда)"""
+        """Получить информацию о клиенте по UUID"""
         result = await self._request('GET', f'/panel/api/inbounds/getClientTraffic?id={client_uuid}')
         
         if result and result.get('success') and result.get('obj'):
             return result['obj']
         return None
 
-    async def get_client_all_inbounds(self, client_uuid: str) -> Optional[Dict]:
-        """Получить суммарную информацию о клиенте по всем инбаундам"""
-        # Список всех инбаундов
-        inbounds = [2, 3, 4, 5, 6]
-        total_up = 0
-        total_down = 0
-        
-        for inbound_id in inbounds:
-            result = await self._request('GET', f'/panel/api/inbounds/getClientTraffic?id={client_uuid}&inbound={inbound_id}')
-            if result and result.get('success') and result.get('obj'):
-                total_up += result['obj'].get('up', 0)
-                total_down += result['obj'].get('down', 0)
-                logger.debug(f"Traffic from inbound {inbound_id}: up={result['obj'].get('up', 0)}, down={result['obj'].get('down', 0)}")
-        
-        if total_up > 0 or total_down > 0:
-            return {
-                'up': total_up,
-                'down': total_down,
-                'total': total_up + total_down
-            }
-        return None
-
     async def enable_client(self, client_uuid: str, enable: bool = True) -> bool:
-        """Включить/отключить клиента во всех инбаундах"""
-        inbounds = [2, 3, 4, 5, 6]
-        success_count = 0
-        
-        for inbound_id in inbounds:
-            payload = {"id": inbound_id, "clientId": client_uuid, "enable": enable}
-            result = await self._request('POST', '/panel/api/inbounds/clientStatus', payload)
-            if result and result.get('success'):
-                success_count += 1
-        
-        return success_count > 0
+        """Включить/отключить клиента"""
+        payload = {"id": self._inbound_id, "clientId": client_uuid, "enable": enable}
+        result = await self._request('POST', '/panel/api/inbounds/clientStatus', payload)
+        return result and result.get('success', False)
 
     async def get_client_config(
         self, 
         client_uuid: str, 
         server_host: str, 
-        plan_name: str,
-        public_key: str = None,
-        short_id: str = None,
-        sni: str = None
+        port: int,
+        public_key: str,
+        short_id: str,
+        name: str,
+        sni: str = None,
+        fingerprint: str = None
     ) -> str:
-        """Сгенерировать vless:// ссылку для подключения (для одного сервера)"""
-        pbk = public_key or os.getenv('VPN_REALITY_PUBLIC_KEY', '')
-        sid = short_id or os.getenv('VPN_REALITY_SHORT_ID', '')
-        sni_value = sni or os.getenv('VPN_REALITY_SNI', 'www.cloudflare.com')
+        """Сгенерировать vless:// ссылку для одного сервера"""
+        sni_value = sni or "www.cloudflare.com"
+        fp_value = fingerprint or "chrome"
         
-        if not pbk:
-            pbk = "NnIZ6QgJpOYfL7K7NuS4lWuDNdhRNOQlshTf6SK4O2Y"
-            logger.warning("Using default public key")
-        if not sid:
-            sid = "9020f7"
-            logger.warning("Using default short id")
+        encoded_name = urllib.parse.quote(name)
         
-        name = urllib.parse.quote(plan_name)
-        
-        config = (
-            f"vless://{client_uuid}@{server_host}:443"
+        return (
+            f"vless://{client_uuid}@{server_host}:{port}"
             f"?type=tcp&security=reality"
-            f"&pbk={pbk}&fp=chrome"
-            f"&sni={sni_value}&sid={sid}"
-            f"#{name}"
+            f"&pbk={public_key}&fp={fp_value}"
+            f"&sni={sni_value}&sid={short_id}"
+            f"#{encoded_name}"
         )
-        
-        logger.info(f"Generated config for {client_uuid}")
-        return config
 
-    async def get_subscription_link(self, client_uuid: str) -> str:
-        """Сгенерировать ссылку-подписку для V2RayNG"""
-        return f"{self.api_url}/sub/{client_uuid}"
+    async def get_all_configs(
+        self, 
+        client_uuid: str, 
+        server_host: str, 
+        servers: List[Dict],
+        sni: str = None,
+        fingerprint: str = None
+    ) -> List[str]:
+        """Сгенерировать все vless:// ссылки для всех серверов"""
+        links = []
+        for server in servers:
+            link = await self.get_client_config(
+                client_uuid=client_uuid,
+                server_host=server_host,
+                port=server['port'],
+                public_key=server['public_key'],
+                short_id=server['short_id'],
+                name=server['name'],
+                sni=sni,
+                fingerprint=fingerprint
+            )
+            links.append(link)
+        return links
+
+    async def get_subscription_url(self, subscription_id: str, base_url: str = None) -> str:
+        """Сгенерировать ссылку на подписку"""
+        if not base_url:
+            base_url = "http://panel.3utilities.com:2096"
+        return f"{base_url}/sub/{subscription_id}"
 
     async def close(self):
         if self._session:
