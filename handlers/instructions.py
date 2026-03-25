@@ -5,7 +5,7 @@ from sqlalchemy import select
 from database.session import AsyncSessionLocal
 from database.crud import get_plan
 from database.models import Trial, Subscription
-from config import VPN_SERVER_IP, VPN_REALITY_PUBLIC_KEY, VPN_REALITY_SHORT_ID, XUI_HOST, XUI_USERNAME, XUI_PASSWORD
+from config import VPN_SERVER_IP, XUI_HOST, XUI_USERNAME, XUI_PASSWORD, SERVERS, REALITY_SNI, REALITY_FINGERPRINT, SUBSCRIPTION_URL
 from vpn.xui import XUIClient
 import logging
 
@@ -43,7 +43,16 @@ async def get_active_subscription(session, user_id: int):
     
     if trial:
         logger.info(f"Found trial for user {user_id}, expires at {trial.end_date}")
-        return None
+        # Если есть Trial, ищем связанную подписку
+        sub = await session.execute(
+            select(Subscription).where(
+                Subscription.user_id == user_id,
+                Subscription.end_date == trial.end_date
+            )
+        )
+        subscription = sub.scalar_one_or_none()
+        if subscription:
+            return subscription
     
     return None
 
@@ -196,17 +205,15 @@ async def get_vpn_key(callback: types.CallbackQuery):
             )
             return
         
-        # Генерируем ссылку-подписку
-        sub_link = f"{XUI_HOST}/sub/{subscription.client_id}"
+        # Используем единую ссылку-подписку
+        sub_link = SUBSCRIPTION_URL
         
-        # Определяем название подписки с сервером
-        server_name = "Frankfurt"
-        
+        # Определяем название подписки
         if subscription.plan_id:
             plan = await get_plan(session, subscription.plan_id)
-            plan_name = f"MILF VPN - {server_name} ({plan.name})"
+            plan_name = f"MILF VPN ({plan.name})"
         else:
-            plan_name = f"MILF VPN - {server_name} (Trial)"
+            plan_name = "MILF VPN (Trial)"
         
         # Форматируем дату и время
         end_date = subscription.end_date
@@ -214,21 +221,24 @@ async def get_vpn_key(callback: types.CallbackQuery):
         end_time_str = end_date.strftime('%H:%M')
         
         # Получаем суммарный использованный трафик по всем серверам
-        xui = XUIClient(XUI_HOST, XUI_USERNAME, XUI_PASSWORD)
         total_usage = 0
         try:
-            client_stats = await xui.get_client_all_inbounds(subscription.client_id)
+            xui = XUIClient(XUI_HOST, XUI_USERNAME, XUI_PASSWORD)
+            client_stats = await xui.get_client(subscription.client_id)
             if client_stats:
-                total_usage = client_stats.get('total', 0) / (1024**3)
+                total_usage = (client_stats.get('up', 0) + client_stats.get('down', 0)) / (1024**3)
+            await xui.close()
         except Exception as e:
             logger.error(f"Error getting client stats: {e}")
-        await xui.close()
         
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📋 Скопировать ссылку", callback_data=f"copy_sub_{subscription.client_id}")],
             [InlineKeyboardButton(text="📱 Добавить в V2RayNG", url=sub_link)],
             [InlineKeyboardButton(text="◀ Назад", callback_data="instructions")]
         ])
+        
+        # Список серверов для отображения
+        servers_list = " | ".join([s['name'] for s in SERVERS])
         
         await callback.message.answer(
             f"🔑 *{plan_name}*\n\n"
@@ -239,8 +249,7 @@ async def get_vpn_key(callback: types.CallbackQuery):
             f"1️⃣ Нажмите + → Add Subscription\n"
             f"2️⃣ Вставьте ссылку\n"
             f"3️⃣ Нажмите обновить\n\n"
-            f"✨ *Доступные серверы:*\n"
-            f"🇩🇪 Германия | 🇮🇳 Индия | 🇷🇺 Россия СПБ | 🇮🇹 Италия | 🇹🇷 Турция",
+            f"✨ *Доступные серверы:*\n{servers_list}",
             reply_markup=keyboard,
             parse_mode="Markdown"
         )
@@ -253,14 +262,15 @@ async def get_vpn_key(callback: types.CallbackQuery):
 async def copy_sub_link(callback: types.CallbackQuery):
     """Скопировать ссылку-подписку"""
     client_id = callback.data.split("_")[2]
-    sub_link = f"{XUI_HOST}/sub/{client_id}"
+    sub_link = SUBSCRIPTION_URL
+    
+    servers_list = " | ".join([s['name'] for s in SERVERS])
     
     await callback.answer()
     await callback.message.answer(
         f"🔗 *Ваша ссылка-подписка:*\n`{sub_link}`\n\n"
         f"Скопируйте её и вставьте в V2RayNG → Add Subscription.\n\n"
-        f"✨ После добавления у вас появятся все серверы:\n"
-        f"🇩🇪 Германия | 🇮🇳 Индия | 🇷🇺 Россия СПБ | 🇮🇹 Италия | 🇹🇷 Турция",
+        f"✨ После добавления у вас появятся все серверы:\n{servers_list}",
         parse_mode="Markdown"
     )
 
@@ -268,14 +278,14 @@ async def copy_sub_link(callback: types.CallbackQuery):
 @router.callback_query(lambda c: c.data.startswith("copy_link_"))
 async def copy_link_callback(callback: types.CallbackQuery):
     """Обработка кнопки копирования ссылки (старый формат, для совместимости)"""
-    client_id = callback.data.split("_")[2]
-    sub_link = f"{XUI_HOST}/sub/{client_id}"
+    sub_link = SUBSCRIPTION_URL
+    
+    servers_list = " | ".join([s['name'] for s in SERVERS])
     
     await callback.answer()
     await callback.message.answer(
         f"🔗 *Ваша ссылка-подписка:*\n`{sub_link}`\n\n"
         f"Скопируйте её и вставьте в V2RayNG → Add Subscription.\n\n"
-        f"✨ После добавления у вас появятся все серверы:\n"
-        f"🇩🇪 Германия | 🇮🇳 Индия | 🇷🇺 Россия СПБ | 🇮🇹 Италия | 🇹🇷 Турция",
+        f"✨ После добавления у вас появятся все серверы:\n{servers_list}",
         parse_mode="Markdown"
     )
