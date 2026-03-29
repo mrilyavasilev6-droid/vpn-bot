@@ -18,6 +18,20 @@ async def create_user(session: AsyncSession, user_id: int, username: str, referr
     return user
 
 
+async def update_user_marzban_username(session: AsyncSession, user_id: int, marzban_username: str):
+    """Сохранить marzban_username пользователя"""
+    await session.execute(
+        update(User).where(User.user_id == user_id).values(marzban_username=marzban_username)
+    )
+    await session.commit()
+
+
+async def get_user_by_marzban_username(session: AsyncSession, marzban_username: str):
+    """Получить пользователя по marzban_username"""
+    result = await session.execute(select(User).where(User.marzban_username == marzban_username))
+    return result.scalar_one_or_none()
+
+
 async def get_plan(session: AsyncSession, plan_id: int):
     """Получить тариф по ID"""
     result = await session.execute(select(Plan).where(Plan.id == plan_id, Plan.is_active == True))
