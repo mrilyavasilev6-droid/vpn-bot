@@ -4,8 +4,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import select
 from database.session import AsyncSessionLocal
 from database.models import Subscription, Server, User
-from vpn.xui import XUIClient
-from config import XUI_HOST, XUI_USERNAME, XUI_PASSWORD, MOCK_MODE
+from config import MOCK_MODE
 import logging
 
 scheduler = AsyncIOScheduler()
@@ -13,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 async def check_expired_subscriptions():
-    """Удаляет истекшие подписки и отключает клиентов на всех серверах."""
+    """Деактивирует истекшие подписки в БД."""
     if MOCK_MODE:
         logger.info("MOCK_MODE: skip expired subscriptions check")
         return
@@ -34,20 +33,15 @@ async def check_expired_subscriptions():
         
         logger.info(f"Found {len(expired_list)} expired subscriptions to process")
         
-        xui = XUIClient(XUI_HOST, XUI_USERNAME, XUI_PASSWORD)
-        
         for sub in expired_list:
             try:
-                # Удаляем клиента из всех инбаундов (метод delete_client уже удаляет из всех)
-                await xui.delete_client(sub.client_id)
+                # Деактивируем подписку в БД
                 sub.is_active = False
-                logger.info(f"✅ Deleted expired client: {sub.client_id} (user {sub.user_id})")
+                logger.info(f"✅ Deactivated expired subscription: {sub.client_id} (user {sub.user_id})")
             except Exception as e:
-                logger.error(f"❌ Error deleting client {sub.client_id}: {e}")
-            
-            await session.commit()
+                logger.error(f"❌ Error deactivating subscription {sub.client_id}: {e}")
         
-        await xui.close()
+        await session.commit()
 
 
 async def notify_expiring(bot):
@@ -84,8 +78,7 @@ async def notify_expiring(bot):
                         f"Ваш{sub_type} истекает через {days} дня/дней.\n\n"
                         f"📅 *Дата окончания:* {end_date_str} МСК\n\n"
                         f"Чтобы не потерять доступ, продлите подписку в разделе «Выбрать тариф».\n\n"
-                        f"✨ После продления у вас останутся все серверы:\n"
-                        f"🇩🇪 Германия | 🇮🇳 Индия | 🇷🇺 Россия СПБ | 🇮🇹 Италия | 🇹🇷 Турция",
+                        f"✨ После продления подписка продолжит работать автоматически",
                         parse_mode="Markdown"
                     )
                     logger.info(f"Expiration notification sent to user {user.user_id} ({days} days left)")
@@ -96,11 +89,10 @@ async def notify_expiring(bot):
 async def daily_stats(bot):
     """Ежедневная статистика для админов (опционально)"""
     from config import ADMIN_IDS
+    from database.models import User, Subscription, Transaction
+    from sqlalchemy import func
     
     async with AsyncSessionLocal() as session:
-        from database.models import User, Subscription, Transaction
-        from sqlalchemy import func
-        
         total_users = await session.execute(select(func.count()).select_from(User))
         active_subs = await session.execute(
             select(func.count()).select_from(Subscription).where(Subscription.is_active == True)
@@ -124,10 +116,8 @@ async def daily_stats(bot):
             f"👥 *Всего пользователей:* {total_users}\n"
             f"✅ *Активных подписок:* {active_subs}\n"
             f"💰 *Доход за сегодня:* {today_income/100:.2f} ₽\n\n"
-            f"🌍 *Активные серверы:*\n"
-            f"🇩🇪 Германия (443) | 🇮🇳 Индия (444)\n"
-            f"🇷🇺 Россия СПБ (445) | 🇮🇹 Италия (446)\n"
-            f"🇹🇷 Турция (447)"
+            f"🌍 *Серверы:* Панель Marzban\n"
+            f"🔗 *Панель управления:* https://vpn.olin.mooo.com/dashboard/"
         )
         
         for admin_id in ADMIN_IDS:
