@@ -6,8 +6,8 @@ from sqlalchemy import select, func
 from database.session import AsyncSessionLocal
 from database.crud import get_user, get_user_active_subscription, get_plan
 from database.models import User, Trial, Subscription
-from vpn.xui import XUIClient
-from config import MOCK_MODE, XUI_HOST, XUI_USERNAME, XUI_PASSWORD, SERVERS
+from marzban_api import MarzbanAPI
+from config import MOCK_MODE, SUBSCRIPTION_URL
 import logging
 
 router = Router()
@@ -22,29 +22,27 @@ async def get_referral_count(session, user_id: int) -> int:
     return result.scalar() or 0
 
 
-async def get_total_traffic(client_id: str) -> float:
-    """Получить суммарный трафик по всем серверам"""
-    if MOCK_MODE or not client_id or client_id.startswith('mock'):
+async def get_total_traffic(marzban_username: str) -> float:
+    """Получить суммарный трафик из Marzban"""
+    if MOCK_MODE or not marzban_username or marzban_username.startswith('mock'):
         return 0.0
     
     try:
-        xui = XUIClient(XUI_HOST, XUI_USERNAME, XUI_PASSWORD)
-        stats = await xui.get_client(client_id)
-        await xui.close()
-        if stats:
-            return (stats.get('up', 0) + stats.get('down', 0)) / (1024**3)
+        marzban = MarzbanAPI()
+        user_info = await marzban.get_user_info(marzban_username)
+        if user_info:
+            # used_traffic в Marzban возвращается в байтах
+            return user_info.get('used_traffic', 0) / (1024**3)
     except Exception as e:
-        logger.error(f"Error getting traffic for {client_id}: {e}")
+        logger.error(f"Error getting traffic for {marzban_username}: {e}")
     
     return 0.0
 
 
 def get_servers_list() -> str:
     """Сформировать список серверов для отображения"""
-    servers_text = ""
-    for s in SERVERS:
-        servers_text += f"{s['name']} ({s['port']}) | "
-    return servers_text[:-3]  # убираем последний " | "
+    servers_text = "🌍 Все серверы настраиваются в панели Marzban"
+    return servers_text
 
 
 @router.callback_query(lambda c: c.data == "profile")
@@ -94,8 +92,8 @@ async def show_profile(callback: types.CallbackQuery):
             else:
                 plan_name = "🔓 Пробный период"
             
-            # Получаем суммарный трафик по всем серверам
-            total_usage = await get_total_traffic(subscription.client_id)
+            # Получаем суммарный трафик из Marzban
+            total_usage = await get_total_traffic(user.marzban_username) if user.marzban_username else 0.0
             
             profile_text = (
                 f"👤 *Профиль MILF VPN*\n\n"
