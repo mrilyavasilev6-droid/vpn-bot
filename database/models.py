@@ -14,6 +14,7 @@ class User(Base):
     auto_renew = Column(Boolean, default=False)   # автопродление
     trial_used = Column(Boolean, default=False)   # использовал ли пробный период
     trial_end_date = Column(DateTime, nullable=True)  # дата окончания пробного периода (если активен)
+    marzban_username = Column(String(255), unique=True, nullable=True)  # имя пользователя в Marzban
 
 class Plan(Base):
     __tablename__ = 'plans'
@@ -42,7 +43,7 @@ class Subscription(Base):
     id = Column(Integer, primary_key=True)
     user_id = Column(BigInteger, ForeignKey('users.user_id', ondelete='CASCADE'))
     plan_id = Column(Integer, ForeignKey('plans.id'))
-    client_id = Column(String(255))          # ID клиента в VPN-панели
+    client_id = Column(String(255))          # ID клиента в VPN-панели (в Marzban это username)
     server_id = Column(Integer, ForeignKey('servers.id'))
     start_date = Column(DateTime, server_default=func.now())
     end_date = Column(DateTime, nullable=False)
