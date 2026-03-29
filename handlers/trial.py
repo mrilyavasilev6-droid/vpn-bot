@@ -5,11 +5,9 @@ import time
 from sqlalchemy import select, delete
 from database.session import AsyncSessionLocal
 from database.models import User, Trial, Subscription
-from vpn.xui import XUIClient
-from config import (
-    XUI_HOST, XUI_USERNAME, XUI_PASSWORD, MOCK_MODE, 
-    VPN_SERVER_IP, SERVERS, REALITY_SNI, REALITY_FINGERPRINT
-)
+from marzban_api import MarzbanAPI
+from database.crud import update_user_marzban_username
+from config import MOCK_MODE, SUBSCRIPTION_URL
 import logging
 
 router = Router()
@@ -102,46 +100,41 @@ async def trial_start(callback: types.CallbackQuery):
             await callback.answer()
             return
         
-        # Создаём нового клиента в панели
+        # Создаём пробного клиента в Marzban
         trial_days = 3
         trial_end = datetime.now() + timedelta(days=trial_days)
         
         logger.info(f"Creating trial client for user {user_id}")
         
-        # Используем уникальный email с timestamp
-        email = f"trial_{user_id}_{int(time.time())}"
-        
-        # Берём первый сервер (Германия) для пробного периода
-        first_server = SERVERS[0]
+        marzban = MarzbanAPI()
         
         if MOCK_MODE:
-            client_id = f"mock_trial_{user_id}"
-            config_link = f"vless://mock@{VPN_SERVER_IP}:{first_server['port']}?type=tcp&security=reality#Mock_Trial"
+            marzban_username = f"mock_trial_{user_id}"
+            subscription_url = f"https://vpn.olin.mooo.com/sub/{marzban_username}"
+            client_id = marzban_username
         else:
             try:
-                xui = XUIClient(XUI_HOST, XUI_USERNAME, XUI_PASSWORD)
-                client_id = await xui.add_client(trial_days, email=email)
-                await xui.close()
+                marzban_username = f"trial_{user_id}_{int(time.time())}"
                 
-                if not client_id:
-                    logger.error(f"Failed to create client for user {user_id}")
-                    await callback.message.answer("❌ Ошибка при создании пробной подписки. Попробуйте позже.")
-                    await callback.answer()
-                    return
-                else:
-                    logger.info(f"Client created with UUID: {client_id}, email: {email}")
-                    
-                    # Генерируем ссылку для пробного периода (используем Германию)
-                    config_link = (
-                        f"vless://{client_id}@{VPN_SERVER_IP}:{first_server['port']}"
-                        f"?type=tcp&security=reality"
-                        f"&pbk={first_server['public_key']}&fp={REALITY_FINGERPRINT}"
-                        f"&sni={REALITY_SNI}&sid={first_server['short_id']}"
-                        f"#Trial"
-                    )
+                await marzban.create_user(
+                    username=marzban_username,
+                    expire_days=trial_days,
+                    data_limit_gb=0
+                )
+                
+                subscription_url = await marzban.get_subscription_link(marzban_username)
+                if not subscription_url:
+                    subscription_url = f"https://vpn.olin.mooo.com/sub/{marzban_username}"
+                client_id = marzban_username
+                
+                # Сохраняем marzban_username в БД
+                await update_user_marzban_username(session, user_id, marzban_username)
+                
+                logger.info(f"Marzban trial user created: {marzban_username}")
+                
             except Exception as e:
-                logger.error(f"Error creating client: {e}")
-                await callback.message.answer("❌ Ошибка подключения к VPN серверу. Попробуйте позже.")
+                logger.error(f"Error creating trial client in Marzban: {e}")
+                await callback.message.answer("❌ Ошибка при создании пробной подписки. Попробуйте позже.")
                 await callback.answer()
                 return
         
@@ -190,17 +183,16 @@ async def trial_start(callback: types.CallbackQuery):
         ])
         
         await callback.message.answer(
-            f"🎉 *Пробный период 3 дня активирован!*\n\n"
-            f"🔑 *Ваш ключ:*\n`{config_link}`\n\n"
+            f"🎉 *Пробный период {trial_days} дня активирован!*\n\n"
+            f"🔗 *Ваша ссылка-подписка:*\n`{subscription_url}`\n\n"
             f"📅 *Действует до:* {end_date_str} в {end_time_str} МСК\n\n"
             f"📱 *Как подключиться:*\n"
-            f"1️⃣ Скачайте V2RayNG (Android) или Streisand (iOS)\n"
-            f"2️⃣ Нажмите + → Import from clipboard\n"
+            f"1️⃣ Скопируйте ссылку\n"
+            f"2️⃣ Откройте V2RayNG → + → Add Subscription\n"
             f"3️⃣ Вставьте ссылку\n"
-            f"4️⃣ Нажмите ▶️ для подключения\n\n"
-            f"Инструкцию можно найти в меню «Инструкция»\n\n"
-            f"🌍 *После активации платной подписки вы получите доступ ко всем серверам:*\n"
-            f"🇩🇪 Германия | 🇮🇳 Индия | 🇷🇺 Россия | 🇮🇹 Италия | 🇹🇷 Турция",
+            f"4️⃣ Нажмите обновить\n"
+            f"5️⃣ Нажмите ▶️ для подключения\n\n"
+            f"💡 *Совет:* После активации платной подписки вам не нужно менять настройки — всё работает автоматически",
             reply_markup=keyboard,
             parse_mode="Markdown"
         )
